@@ -9,7 +9,15 @@ simple http(s) web interface, with a nice chart there.
 
 Network connection is also setup by the script from a `simple ini config`_.
 
-Not implemented and not documented yet - maybe check back later.
+Implementation status and roadmap:
+
+- ☒ - Basic WiFi network configuration / roaming
+- ☒ - I2C sensor communication/polling with verbose=yes console logging
+- ☐ - I2C error handling and rate-limiting
+- ☐ - WebUI raw data export
+- ☐ - WebUI tables
+- ☐ - WebUI chart(s)
+- ☐ - Basic info on how to connect stuff, diagrams/images
 
 .. contents::
   :backlinks: none
@@ -36,7 +44,7 @@ Links
 - ESPHome_ - more comprehensive home automation system,
   which also supports SEN5x sensors connected to RP2040 platforms.
 
-- `Sensirion/python-i2c-sen5x`_ - official SEN5x python driver code and examples.
+- `Sensirion/python-i2c-sen5x`_ - SEN5x vendor python driver code and examples (not used here).
 
 .. _ESPHome: https://esphome.io/components/sensor/sen5x.html
 .. _Sensirion/python-i2c-sen5x: https://github.com/Sensirion/python-i2c-sen5x
