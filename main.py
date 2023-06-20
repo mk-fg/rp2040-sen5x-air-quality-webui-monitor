@@ -23,12 +23,22 @@ class AQMConf:
 	sensor_i2c_addr = 105
 	sensor_i2c_freq = 100_000 # 0 = machine.I2C default, sen5x has 100kbps max
 	sensor_i2c_timeout = 0.0 # 0 = machine.I2C default
+	sensor_i2c_error_limit = '8 / 3m'
 
 	webui_sample_interval = 10.0
 	webui_sample_count = 100
 
 p_err = lambda *a: print('ERROR:', *a) or 1
 err_fmt = lambda err: f'[{err.__class__.__name__}] {err}'
+
+def token_bucket_iter(spec): # spec = N / M[smhd], e.g. 10 / 15m
+	burst, span = map(str.strip, spec.split('/', 1))
+	span = float(span[:-1]) * {'s': 1, 'm': 60, 'h': 3600, 'd': 24*3600}[span[-1]]
+	rate = 1 / (1000 * span / (burst := int(burst))) # token / ms
+	tokens, ts = max(0, burst - 1), time.ticks_ms()
+	while (yield tokens >= 0) or (ts_sync := ts):
+		tokens = min( burst, tokens +
+			time.ticks_diff(ts := time.ticks_ms(), ts_sync) * rate ) - 1
 
 
 def conf_parse(conf_file):
@@ -181,7 +191,7 @@ class Sen5x:
 		# print('i2c [cmd]', cmd_name, cmd, delay, rx_bytes, rx_parser)
 		await self.cmd_lock.acquire()
 		try: return await self._run(cmd, delay, rx_bytes, rx_parser)
-		except OSError as err: raise Sen5xError(f'I2C I/O failure: {err_fmt(err)}')
+		except OSError as err: raise self.Sen5xError(f'I2C I/O failure: {err_fmt(err)}')
 		finally: self.cmd_lock.release()
 
 	async def _run( self, cmd, delay,
@@ -204,7 +214,7 @@ class Sen5x:
 			for n in range(0, rx_bytes, 3):
 				b1, b2, crc = rx[n:n+3]
 				if crc != crc_map[b2 ^ crc_map[b1 ^ 0xff]]:
-					raise Sen5xError('RX buffer CRC8 mismatch')
+					raise self.Sen5xError('RX buffer CRC8 mismatch')
 				if m := n - (n+1) // 3: rx[m], rx[m+1] = b1, b2
 			return rx_parser(rx[:rx_bytes-(rx_bytes+1)//3])
 
@@ -213,14 +223,20 @@ class Sen5x:
 
 
 async def sen5x_poller(
-		sen5x, td_data, td_errs, reset=False, stop=False, verbose=False ):
+		sen5x, td_data, td_errs, err_rate_limit,
+		reset=False, stop=False, verbose=False ):
 	p_log = verbose and (lambda *a: print('[sensor]', *a))
 	if reset: await sen5x('reset')
 	await sen5x('meas_start')
 	p_log and p_log('Started measurement mode')
 	try:
-		# XXX: rate-limit Sen5x.Sen5xError here to only abort on "too many"
-		await _sen5x_poller(sen5x, td_data, td_errs, p_log)
+		err_last = ValueError('Invalid error rate-limiter settings')
+		while next(err_rate_limit):
+			try: await _sen5x_poller(sen5x, td_data, td_errs, p_log)
+			except Sen5x.Sen5xError as err:
+				p_log and p_log(f'Sen5x poller failure: {err_fmt(err)}')
+				err_last = err
+		p_err(f'Sensor-poll failure rate-limiting: {err_fmt(err_last)}')
 	finally:
 		if stop:
 			try: await sen5x('meas_stop')
@@ -234,7 +250,7 @@ async def _sen5x_poller(sen5x, td_data, td_errs, p_log):
 		ts = time.ticks_ms()
 
 		if ts_data < 0 or (td1 := int(td_data - time.ticks_diff(ts, ts_data))) < 0:
-			while td_data <= 1000 and not await sen5x('data_ready'):
+			while (ts_data < 0 or td_data <= 1000) and not await sen5x('data_ready'):
 				p_log and p_log('data_ready delay')
 				await asyncio.sleep_ms(200)
 			pm10, pm25, pm40, pm100, rh, t, voc, nox = await sen5x('data_read')
@@ -269,7 +285,7 @@ async def main():
 
 	i2c = dict()
 	if conf.sensor_i2c_freq: i2c['freq'] = conf.sensor_i2c_freq
-	if conf.sensor_i2c_timeout: i2c['timeout'] = int(conf.sensor_i2c_timeout * 1e3)
+	if conf.sensor_i2c_timeout: i2c['timeout'] = int(conf.sensor_i2c_timeout * 1000)
 	if min(conf.sensor_i2c_n, conf.sensor_i2c_pin_sda, conf.sensor_i2c_pin_scl) < 0:
 		return p_err('Sensor I2C bus/pin parameters must be set in the config file')
 	i2c = machine.I2C( conf.sensor_i2c_n,
@@ -282,6 +298,7 @@ async def main():
 		sen5x,
 		td_data=int(conf.webui_sample_interval * 1000),
 		td_errs=int(conf.sensor_error_check_interval * 1000),
+		err_rate_limit=token_bucket_iter(conf.sensor_i2c_error_limit),
 		stop=conf.sensor_stop_on_exit,
 		reset=conf.sensor_reset_on_start,
 		verbose=conf.sensor_verbose )))

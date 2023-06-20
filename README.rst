@@ -13,7 +13,7 @@ Implementation status and roadmap:
 
 - ☒ - Basic WiFi network configuration / roaming
 - ☒ - I2C sensor communication/polling with verbose=yes console logging
-- ☐ - I2C error handling and rate-limiting
+- ☒ - I2C error handling and rate-limiting
 - ☐ - WebUI raw data export
 - ☐ - WebUI tables
 - ☐ - WebUI chart(s)
