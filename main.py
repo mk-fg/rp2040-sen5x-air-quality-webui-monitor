@@ -130,41 +130,21 @@ async def wifi_client(ap_base, ap_map):
 
 class Sen5x:
 
-	class cmd:
-
-		meas_start = b'\x00!'
-		meas_start_td_post = 0.05
-
-		meas_stop = b'\x01\x04'
-		meas_stop_td_post = 0.16
-
-		data_ready = b'\x02\x02'
-		data_ready_bs_rx = 3
-		data_ready_td_read = 0.02
-		data_ready_parse = staticmethod(lambda rx: rx[1] != 0)
-
-		data_read = b'\x03\xc4'
-		data_read_bs_rx = 24
-		data_read_td_read = 0.02
-		data_read_parse = staticmethod(
+	_cmd_st_parse = ( lambda rx,_bits=dict( # lists warnings/errors, if any
+			warn_fan_speed=21, err_gas=7, err_rht=6, err_laser=5, err_fan=4 ):
+		dict() if not (st := struct.unpack('>I', rx)[0])
+			else list(k for k, n in _bits.items() if st & (1<<n)) )
+	cmd_map = dict(
+		# cmd=(tx_cmd, delay) or (tx_cmd, delay, rx_bytes, rx_parser)
+		meas_start=(b'\x00!', 0.05),
+		meas_stop = (b'\x01\x04', 0.16),
+		reset = (b'\xd3\x04', 0.1),
+		data_ready = (b'\x02\x02', 0.02, 3, lambda rx: rx[1] != 0),
+		data_read = ( b'\x03\xc4', 0.02, 24,
 			# pm10, pm25, pm40, pm100, rh, t, voc, nox = result
-			lambda rx: map(int, struct.unpack('>HHHHhhhh', rx)) )
-
-		status_read = b'\xd2\x06'
-		status_read_bs_rx = 6
-		status_read_td_read = 0.02
-		status_read_parse = staticmethod( lambda rx,_bits=dict(
-				warn_fan_speed=21, err_gas=7, err_rht=6, err_laser=5, err_fan=4 ):
-			dict() if not (st := struct.unpack('>I', rx)[0])
-				else list(k for k, n in _bits.items() if st & (1<<n)) )
-
-		status_read_clear = b'\xd2\x10'
-		status_read_clear_bs_rx = 6
-		status_read_clear_td_read = 0.02
-		status_read_clear_parse = status_read_parse
-
-		reset = b'\xd3\x04'
-		reset_td_post = 0.1
+			lambda rx: map(int, struct.unpack('>HHHHhhhh', rx)) ),
+		status_read = (b'\xd2\x06', 0.02, 6, _cmd_st_parse),
+		status_read_clear = (b'\xd2\x10', 0.02, 6, _cmd_st_parse) )
 
 	def __init__(self, i2c, addr=0x69):
 		self.bus, self.addr, self.cmd_lock = i2c, addr, asyncio.Lock()
@@ -185,52 +165,51 @@ class Sen5x:
 		for b in bs: crc = crc_map[crc ^ b]
 		return crc
 
-	async def run(self, cmd):
+	async def __call__(self, cmd):
+		if len(cmd := self.cmd_map[cmd]) == 2:
+			cmd, delay = cmd; rx_bytes = rx_parser = 0
+		else: cmd, delay, rx_bytes, rx_parser = cmd
 		await self.cmd_lock.acquire()
-		try: await self._run(cmd)
+		try: await self._run(cmd, delay, rx_bytes, rx_parser)
 		finally: self.cmd_lock.release()
-	async def _run(self, cmd, rx=bytearray(24)):
+
+	async def _run(self, cmd, delay, rx_bytes, rx_parser, rx=bytearray(24)):
 		# Will raise OSError from any I2C interactions
-		if self.cmd_ms_last:
+
+		if self.cmd_ms_last: # delay from last command, if any needed
 			td = time.ticks_diff(time.ticks_ms(), self.cmd_ms_last)
 			if (ms := self.cmd_ts_wait - td) > 0: await asyncio.sleep_ms(ms)
 			self.cmd_ms_last = 0
+		self.bus.writeto(self.addr, cmd)
 
-		self.bus.writeto(self.addr, getattr(self.cmd, cmd))
-		if td := getattr(self.cmd, f'{cmd}_td_read', 0):
-			await asyncio.sleep(td)
-		if bs := getattr(self.cmd, f'{cmd}_bs_rx', 0):
-			self.bus.readfrom_into(self._addr, memoryview(rx)[:bs])
+		if rx_bytes:
+			if delay: await asyncio.sleep(delay)
+			self.bus.readfrom_into(self.addr, memoryview(rx)[:rx_bytes])
+		elif delay: # only needed if commands closely follow each other
+			self.cmd_ms_last, self.cmd_ts_wait = time.ticks_ms(), int(delay * 1000)
+		if not rx_bytes: return
 
-		if td := getattr(self.cmd, f'{cmd}_td_post', 0):
-			# Delay is only needed if commands closely follow each other
-			self.cmd_ms_last, self.cmd_ts_wait = time.ticks_ms(), int(td * 1000)
-
-		if not bs: return
-
-		for n in range(bs):
+		for n in range(rx_bytes):
 			if n % 3 == 2:
 				if self.sen5x_crc8(rx[n-2:n]) != rx[n]:
 					raise ValueError('RX buffer CRC8 mismatch')
 			else: rx[n-(n+1)//3] = rx[n] # compacts bytes in the same buffer
-		res = rx[:1+n-(n+1)//3]
-		if parse := getattr(self.cmd, f'{cmd}_parse', None): res = parse(res)
-		return res
+		return rx_parser(rx[:1+n-(n+1)//3])
 
 
 async def sen5x_logger(sen5x, reset=False, verbose=False):
 	p_log = verbose and (lambda *a: print('[sensor]', *a))
-	if reset: sen5x.run('reset')
-	sen5x.run('meas_start')
+	if reset: await sen5x('reset')
+	await sen5x('meas_start')
 	p_log and p_log('Started measurement mode')
 	try:
 
 		for i in range(10):
-			while not sen5x.run('data_ready'):
+			while not await sen5x('data_ready'):
 				p_log and p_log('data_ready delay')
-				time.sleep(1.1)
+				await asyncio.sleep(1.1)
 
-			pm10, pm25, pm40, pm100, rh, t, voc, nox = sen5x.run('data_read')
+			pm10, pm25, pm40, pm100, rh, t, voc, nox = await sen5x('data_read')
 			p_log and p_log('data:', pm10, pm25, pm40, pm100, rh, t, voc, nox)
 
 			# XXX: check how to convert these values
@@ -238,11 +217,11 @@ async def sen5x_logger(sen5x, reset=False, verbose=False):
 			# ambient_temperature = values.ambient_temperature.degrees_celsius
 
 		# XXX: check for these error-flags with a separate interval
-		if errs := sen5x.status_read_clear():
+		if errs := await sen5x('status_read_clear'):
 			p_err('SEN5x problems detected:', ' '.join(errs))
 
 	finally:
-		try: sen5x.run('meas_stop')
+		try: await sen5x('meas_stop')
 		except Exception as err: # avoid hiding original exception, if any
 			p_err(f'Failed to stop measurement mode: {err_fmt(err)}')
 	p_log and p_log('Stopped measurement mode')
