@@ -261,12 +261,12 @@ async def sen5x_poller(
 			p_log and p_log('Stopped measurement mode')
 
 async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
-	errs_seen = set()
+	errs_seen, td_slack = set(), 10 # less loops when sleep() wakes up early
 	ts_data = ts_errs = -1 # time of last data/errs poll
 	while True:
 		ts = ts_loop = time.ticks_ms()
 
-		if ts_data < 0 or (td1 := td_data - time.ticks_diff(ts, ts_data)) < 0:
+		if ts_data < 0 or (td1 := td_data - time.ticks_diff(ts, ts_data)) < td_slack:
 			if ts_data < 0 or td_data <= 1000:
 				while not await sen5x('data_ready'):
 					p_log and p_log('data_ready delay')
@@ -282,7 +282,7 @@ async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
 			else: # next poll at ts_loop + td_data, to keep intervals from drifting
 				td1 = td_data - time.ticks_diff(ts, ts_data := ts_loop)
 
-		if ts_errs < 0 or (td2 := td_errs - time.ticks_diff(ts, ts_errs)) < 0:
+		if ts_errs < 0 or (td2 := td_errs - time.ticks_diff(ts, ts_errs)) < td_slack:
 			# Errors are logged once here, but stick in register/webui until reset/reboot
 			errs = await sen5x('errs_read', buff=srb.buff_mv_err)
 			if errs_new := set(errs).difference(errs_seen):
