@@ -5,7 +5,7 @@ Micropython_ script for `RP2040-based controllers`_ (e.g. `Raspberry Pi Pico`_
 and its clones, but might work on non-RP2xxx devices too) to monitor air quality
 parameters (VOC, PM1.0, PM2.5, PM4, PM10 and such), using connected I2C Sensirion
 SEN5x sensor (e.g. SEN54_ or `SEN54 in a box`_) and display/export that data via
-simple http(s) web interface, with a nice chart there.
+basic http web interface, with a nice chart there.
 
 Network connection is also setup by the script from a `simple ini config`_.
 
@@ -14,7 +14,7 @@ Implementation status and roadmap:
 - ☒ - Basic WiFi network configuration / roaming
 - ☒ - I2C sensor communication/polling with verbose=yes console logging
 - ☒ - I2C error handling and rate-limiting
-- ☐ - WebUI raw data export
+- ☒ - WebUI raw data export
 - ☐ - WebUI tables
 - ☐ - WebUI chart(s)
 - ☐ - Basic info on how to connect stuff, diagrams/images

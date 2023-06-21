@@ -2,6 +2,8 @@ import struct, machine, time
 
 try: import network # required for wifi stuff
 except ImportError: network = None
+try: import socket # required for webui
+except ImportError: socket = None
 
 try: import uasyncio as asyncio
 except ImportError: import asyncio # newer mpy naming
@@ -14,6 +16,8 @@ class AQMConf:
 	wifi_ap_map = dict()
 
 	sensor_verbose = False
+	sensor_sample_interval = 60.0
+	sensor_sample_count = 1_000
 	sensor_reset_on_start = False
 	sensor_stop_on_exit = True
 	sensor_error_check_interval = 3701.0
@@ -25,8 +29,9 @@ class AQMConf:
 	sensor_i2c_timeout = 0.0 # 0 = machine.I2C default
 	sensor_i2c_error_limit = '8 / 3m'
 
-	webui_sample_interval = 60.0
-	webui_sample_count = 1_000
+	webui_verbose = False
+	webui_port = 80
+	webui_conn_backlog = 5
 
 p_err = lambda *a: print('ERROR:', *a) or 1
 err_fmt = lambda err: f'[{err.__class__.__name__}] {err}'
@@ -119,13 +124,13 @@ async def wifi_client(ap_base, ap_map):
 				ap_conn, ap_reconn = ap_reconn, None
 			if not ap_conn:
 				ssid_set = set(ap_info[0].decode('surrogateescape') for ap_info in wifi.scan())
-				p_log and p_log(f'Scan results [ {" ".join(sorted(ssid_set))} ]')
+				p_log and p_log(f'Scan results [ {" // ".join(sorted(ssid_set))} ]')
 				for ssid, ap in ap_map.items():
 					if ssid in ssid_set:
 						ap_conn = dict(ap_base, **ap)
 						break
 			if ap_conn:
-				p_log and p_log(f'Connecting [ {ap_conn["ssid"]} ]')
+				p_log and p_log(f'Connecting to [ {ap_conn["ssid"]} ]')
 				wifi.config(**dict((k, ap_conn[k]) for k in ap_keys if k in ap_conn))
 				wifi.connect( ssid=ap_conn['ssid'],
 					key=ap_conn['key'] or None, bssid=ap_conn.get('mac') or None )
@@ -136,7 +141,7 @@ async def wifi_client(ap_base, ap_map):
 		else: st, delay = 'searching', ap_base['scan_interval']
 		p_log and p_log(f'State = {st}, delay = {delay:.1f}s')
 		await asyncio.sleep(delay)
-	p_err('BUG - wifi loop broken')
+	raise RuntimeError('BUG - wifi loop stopped unexpectedly')
 
 
 class Sen5x:
@@ -146,8 +151,8 @@ class Sen5x:
 	# Returns a list of warn/error strings to print, if any
 	errs_parse = staticmethod(_errs := lambda rx,_bits=dict(
 			warn_fan_speed=21, err_gas=7, err_rht=6, err_laser=5, err_fan=4 ):
-		dict() if not (st := struct.unpack('>I', rx)[0])
-			else list(k for k, n in _bits.items() if st & (1<<n)) )
+		tuple() if not (st := struct.unpack('>I', rx)[0])
+			else tuple(k for k, n in _bits.items() if st & (1<<n)) )
 	errs_bs = 4
 
 	# pm10, pm25, pm40, pm100, rh, t, voc, nox = values
@@ -155,7 +160,7 @@ class Sen5x:
 	sample_parse = staticmethod(_sample := lambda rx,
 			_ks=(10, 10, 10, 10, 100, 200, 10, 10),
 			_nx=(0xffff, 0xffff, 0xffff, 0xffff, 0x7fff, 0x7fff, 0x7fff, 0x7fff):
-		list( (v / k if v != nx else None) for v, k, nx in
+		tuple( (v / k if v != nx else None) for v, k, nx in
 			zip(struct.unpack('>HHHHhhhh', rx), _ks, _nx) ) )
 	sample_bs = 16 # i2c crc8 checksums are already stripped here
 
@@ -232,7 +237,7 @@ class Sen5x:
 
 
 async def sen5x_poller(
-		sen5x, smv, td_data, td_errs, err_rate_limit,
+		sen5x, srb, td_data, td_errs, err_rate_limit,
 		reset=False, stop=False, verbose=False ):
 	p_log = verbose and (lambda *a: print('[sensor]', *a))
 	if reset: await sen5x('reset')
@@ -241,7 +246,7 @@ async def sen5x_poller(
 	try:
 		err_last = ValueError('Invalid error rate-limiter settings')
 		while next(err_rate_limit):
-			try: await _sen5x_poller(sen5x, smv, td_data, td_errs, p_log)
+			try: await _sen5x_poller(sen5x, srb, td_data, td_errs, p_log)
 			except Sen5x.Sen5xError as err:
 				p_log and p_log(f'Sen5x poller failure: {err_fmt(err)}')
 				err_last = err
@@ -253,53 +258,248 @@ async def sen5x_poller(
 				p_err(f'Failed to stop measurement mode: {err_fmt(err)}')
 			p_log and p_log('Stopped measurement mode')
 
-async def _sen5x_poller(sen5x, smv, td_data, td_errs, p_log):
-	ts_data = ts_errs = -1
-	(sn,), sp_offset = struct.unpack_from('>H', smv, 0), 2 + sen5x.errs_bs
-	sn_max = (len(smv) - sp_offset) // (sz := sen5x.sample_bs)
+async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
+	errs_seen = set()
+	ts_data = ts_errs = -1 # time of last data/errs poll
 	while True:
-		ts = time.ticks_ms()
+		ts = ts_loop = time.ticks_ms()
 
-		if ts_data < 0 or (td1 := int(td_data - time.ticks_diff(ts, ts_data))) < 0:
-			while (ts_data < 0 or td_data <= 1000) and not await sen5x('data_ready'):
-				p_log and p_log('data_ready delay')
-				await asyncio.sleep_ms(200)
-
-			sp = sp_offset + sn * sz
-			data = await sen5x('data_read', parse=p_log, buff=smv[sp:sp+sz])
-			struct.pack_into('>H', smv, 0, sn := (sn + 1) % sn_max)
-
+		if ts_data < 0 or (td1 := td_data - time.ticks_diff(ts, ts_data)) < 0:
+			if ts_data < 0 or td_data <= 1000:
+				while not await sen5x('data_ready'):
+					p_log and p_log('data_ready delay')
+					await asyncio.sleep_ms(200)
+				ts = time.ticks_ms()
+			buff = srb.sample_mv(ts)
+			data = await sen5x('data_read', parse=p_log, buff=buff)
+			srb.sample_mv_commit(ts)
 			if p_log:
 				pm10, pm25, pm40, pm100, rh, t, voc, nox = data
 				p_log(f'data: {pm10=} {pm25=} {pm40=} {pm100=} {rh=} {t=} {voc=} {nox=}')
-			td1, ts_data = td_data, ts
+			if time.ticks_diff(ts := time.ticks_ms(), ts_data) - td_data > td_data:
+				td1, ts_data = td_data, ts # set new ts-base at the start or after skips
+			else: # next poll is ts_loop + td_data, to keep intervals from drifting
+				ts_data = ts_loop
+				td1 = td_data - time.ticks_diff(ts, ts_data)
 
-		if ts_errs < 0 or (td2 := int(td_errs - time.ticks_diff(ts, ts_errs))) < 0:
-			if errs := await sen5x('errs_read_clear', buff=smv[2:2+sen5x.errs_bs]):
-				p_err('SEN5x problems detected:', ' '.join(errs))
+		if ts_errs < 0 or (td2 := td_errs - time.ticks_diff(ts, ts_errs)) < 0:
+			# Errors are logged once here, but stick in register/webui until reset/reboot
+			errs = await sen5x('errs_read', buff=srb.buff_mv_err)
+			if errs_new := set(errs).difference(errs_seen):
+				p_err('New SEN5x problems detected:', ' '.join(errs_new))
+				errs_seen.update(errs_new)
 			td2, ts_errs = td_errs, ts
 
 		td = min(td1, td2)
 		p_log and p_log(f'Delay until next sample/check: {td / 1000:.1f}s')
 		await asyncio.sleep_ms(td)
-	p_err('BUG - sen5x poller loop broken')
+	raise RuntimeError('BUG - sen5x poller loop stopped unexpectedly')
+
+
+class SampleRingBuffer:
+	# Samples are stored in bytearray as they're received in Sen5x (circa crc's)
+	# n points to current free slot, n_ts is ticks_ms of the last slot
+	# If new sample has ts - n_ts > 2 * n_td,
+	#   blk_skip is inserted with extra ms to add on top of n_td for that slot,
+	#   otherwise delta between samples is always n_td, as enforced by poller.
+	# To read samples back, blocks can be iterated in (n:n0] with reverse order,
+	#   decrementing timestamp by regular delta and decoded blk_skip values, if any.
+
+	blk_skip = b'\xff\xfe\0\0' # two first impossible-values to mark time-skip blocks
+
+	def __init__(self, td_ms, count):
+		self.n = self.n_loops = self.n_skips = 0
+		self.n_ts = self.skip_last_pos = None
+		self.n_td, self.n_max = td_ms, count
+		self.buff = bytearray(Sen5x.errs_bs + Sen5x.sample_bs * self.n_max)
+		self.buff_mv = memoryview(self.buff)
+		self.buff_mv_err = self.buff_mv[:Sen5x.errs_bs]
+
+	def sample_mv( self, ts,
+			_bs=Sen5x.sample_bs, _pos0=Sen5x.errs_bs, _blk_skip=blk_skip ):
+		# Returns memoryview to store new sample into
+		pos = _pos0 + self.n * _bs
+		if self.buff[pos:pos+4] == _blk_skip: self.n_skips -= 1
+		if self.n_ts is not None and (
+				td := time.ticks_diff(ts, self.n_ts) - self.n_td ) > self.n_td:
+			self.sample_mv_commit(ts, td)
+			return self.sample_mv(ts + self.n_td)
+		return self.buff_mv[pos:pos+_bs]
+
+	def sample_mv_commit( self, ts, td_skip=None,
+			_bs=Sen5x.sample_bs, _pos0=Sen5x.errs_bs, _blk_skip=blk_skip ):
+		# Mark current/last returned sample_mv as used
+		if td_skip: # skip block, storing skipped time-delta in it
+			if pos := self.skip_last_pos: # collapse repeated blk_skip, if any
+				td_skip += self.n_td + int.from_bytes(self.buff[pos+4:pos+8], 'big')
+				self.n -= 1
+			else:
+				pos = self.skip_last_pos = _pos0 + self.n * _bs
+				self.buff[pos:pos+4] = _blk_skip
+				self.n_skips += 1
+			if td_skip > 0xffffffff: # >50d delta = overflow - flush all old data
+				self.n_ts = None; self.n = self.n_loops = self.n_skips = 0; return
+			self.buff[pos+4:pos+8] = td_skip.to_bytes(4, 'big')
+		else: self.skip_last_pos = None
+		self.n_ts, self.n = ts, (self.n + 1) % self.n_max
+		if not self.n: self.n_loops += 1
+
+	def data_chunks(self, _bs=Sen5x.sample_bs, _pos0=Sen5x.errs_bs):
+		if not self.n: return [self.buff_mv[_pos0:]] if self.n_loops else []
+		n = _pos0 + self.n * _bs
+		return ( [self.buff_mv[_pos0:n]]
+			if not self.n_loops else [self.buff_mv[n:], self.buff_mv[_pos0:n]] )
+
+	def data_samples_count(self):
+		return (self.n_max if self.n_loops else self.n) - self.n_skips
+
+	def data_samples_raw( self,
+			_bs=Sen5x.sample_bs, _pos0=Sen5x.errs_bs, _blk_skip=blk_skip ):
+		# Yields (offset_ms, sample_bytes) tuples in reverse-chronological order.
+		# Time offsets are positive integers (from now into past), and can be irregular.
+		# First returned sample (latest one chronologically) will have offset=0ms.
+		td, chunks = 0, self.data_chunks()
+		for chunk in reversed(chunks):
+			pos = len(chunk)
+			while (pos := pos - _bs) >= 0:
+				if chunk[pos:pos+4] != _blk_skip:
+					yield (td, bytes(chunk[pos:pos+_bs]))
+					td += self.n_td
+				else: td += int.from_bytes(chunk[pos+4:pos+8], 'big')
+
+	def data_samples(self, ts_now=0, _parse=Sen5x.sample_parse):
+		# Yields (ts, sample) values, with ts = approx posix timestamp in seconds,
+		#   and sample is (pm10, pm25, pm40, pm100, rh, t, voc, nox) tuple of values,
+		#   in reverse-chronological order (latest sample first).
+		# Values are either float, or None if sensor returns N/A value
+		#   (not ready yet, not supported by this model, broken hardware, etc).
+		for td_ms, sample_bs in self.data_samples_raw():
+			yield (ts_now - (td_ms / 1000), _parse(sample_bs))
+
+
+class WebUI:
+
+	class Req:
+		def __init__(self, **kws): self.update(**kws)
+		def update(self, **kws):
+			for k,v in kws.items(): setattr(self, k, v)
+
+	def __init__(self, srb, verbose=False):
+		self.srb, self.verbose, self.req_n = srb, verbose, 0
+
+	async def run_server(self, server):
+		await server.wait_closed()
+		raise RuntimeError('BUG - httpd server stopped unexpectedly')
+
+	async def request(self, sin, sout):
+		self.req_n += 1
+		req = self.Req(sin=sin, sout=sout, log=self.verbose and (
+			lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a) ))
+		req.log and req.log('Peer:', req.sin.get_extra_info('peername'))
+		line = (await sin.readline()).strip()
+		try: req.verb, req.url, req.proto = line.split(None, 2)
+		except ValueError: return req.log and req.log('Req non-http line:', line)
+		req.log and req.log(f'Request: {req.verb.decode()} {req.url.decode()}')
+		while (await req.sin.readline()).strip(): pass # flush headers, if any
+		req.sin.close()
+		return await self.req_handler(req)
+
+	async def res_err(self, req, code, msg=''):
+		req.log and req.log(f'Response: http-{code} [{msg or "-"}]')
+		req.sout.write(f'HTTP/1.0 {code} {msg}\r\n'.encode())
+		body = ( f'HTTP Error [{code}]: {msg}\n'
+			if msg else f'HTTP Error [{code}]\n' ).encode()
+		req.sout.write(b'Server: aqm\r\nContent-Type: text/plain\r\n')
+		req.sout.write(f'Content-Length: {len(body)}\r\n\r\n'.encode())
+		req.sout.write(body); await req.sout.drain(); req.sout.close()
+
+	async def req_handler(self, req):
+		# TODO: add /favicon.ico
+		req.url_map = dict(
+			page_index=(b'/', b'/index.html', b'/index.htm'),
+			data_csv=(b'/data/all/latest-first/samples.csv',),
+			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',) )
+		req.verb = req.verb.lower()
+		if req.verb != b'get':
+			return await self.res_err(req, 405, 'Method Not Allowed')
+		while b'//' in req.url: req.url = req.url.replace(b'//', b'/')
+		for k, k_url in req.url_map.items():
+			if req.url not in k_url: continue
+			await getattr(self, f'req_{k}')(req)
+			break
+		else: return await self.res_err(req, 404, 'Not Found')
+		await req.sout.drain(); req.sout.close()
+
+	async def req_page_index(self, req):
+		# XXX: add sensor errors here
+		req.sout.write( b'HTTP/1.0 200 OK\r\n'
+			b'Server: aqm\r\nContent-Type: text/html\r\n' )
+		page = b'''<!DOCTYPE html>
+			<meta charset='utf-8'><title>{title}</title><body>
+			<h3>{title}</h3>
+			<ul>
+				<li><a href='{url_data_csv}'>Data export in CSV</a>
+				<li><a href='{url_data_bin}'>Data export in binary format</a>
+					[ 8B time-offset ms (0 = latest) || 16B SEN5x sample ]*
+			</ul>
+		'''.replace(b'\n\t\t\t', b'\n').replace(b'\t', b'  ').format(
+			title='RP2040 SEN5x Air Quality Monitor',
+			**dict((f'url_{k}', url[0].decode()) for k, url in req.url_map.items()) )
+		req.sout.write(f'Content-Length: {len(page)}\r\n\r\n'.encode())
+		req.sout.write(page)
+
+	async def req_data_bin(self, req):
+		req.sout.write( b'HTTP/1.0 200 OK\r\n'
+			b'Server: aqm\r\nContent-Type: application/octet-stream\r\n'
+			b'X-Format: [ 8B time-offset ms (0 = latest) || 16B SEN5x sample ]*\r\n' )
+		bs = self.srb.data_samples_count() * (4 + 16)
+		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
+		for td, sample in self.srb.data_samples_raw():
+			# time-offset ms can overflow here, but should be very unlikely (~50d)
+			req.sout.write(struct.pack('>I16s', td & 0xffffffff, sample))
+
+	async def req_data_csv(self, req):
+		req.sout.write( b'HTTP/1.0 200 OK\r\n'
+			b'Server: aqm\r\nContent-Type: text/csv\r\n' )
+		header = b'time_offset, pm10, pm25, pm40, pm100, rh, t, voc, nox\n'
+		line = bytearray( b' 123456.0, 123.0, 123.0,'
+			b' 123.0, 123.0, 12.34, 12.345, 1234.0, 1234.0\n' )
+		bs = len(header) + self.srb.data_samples_count() * len(line)
+		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
+		req.sout.write(header)
+		# for f in line.rstrip().split(b','): fields.append((n, m:=len(f))); n+=m+1
+		fields = (0,9),(10,6),(17,6),(24,6),(31,6),(38,6),(45,7),(53,7),(61,7)
+		fmt = dict((vlen, f'{{:>{vlen}}}') for pos,vlen in fields)
+		for ts, sample in self.srb.data_samples():
+			vals = (abs(ts),) + sample
+			for v, (pos, vlen) in zip(vals, fields):
+				if v is None: vs = b''
+				else:
+					vs = str(float(v))[:vlen]
+					if '.' not in vs:
+						k = header.decode().split(',')[vals.index(v)]
+						raise ValueError( 'Sensor value too long'
+							+ f' for CSV field [{k.strip()}:{vlen}]: {v}' )
+					vs = vs.rstrip('.').encode()
+				line[pos:pos+vlen] = fmt[vlen].format(vs).encode()
+			req.sout.write(line)
 
 
 async def main():
 	print('--- AQM start ---')
-	tasks, conf = list(), conf_parse('config.ini')
+	conf, components = conf_parse('config.ini'), list()
 
-	if conf.webui_sample_count >= 2**16: # 1 MiB ought to be enough for everybody
+	if conf.sensor_sample_count >= 2**16: # 1 MiB ought to be enough for everybody
 		return p_err('Sample count values >65536 are not supported')
-	samples = bytearray( 2 + Sen5x.errs_bs
-		+ Sen5x.sample_bs * conf.webui_sample_count )
+	conf.sensor_sample_interval = int(conf.sensor_sample_interval * 1000)
+	srb = SampleRingBuffer(
+		conf.sensor_sample_interval, conf.sensor_sample_count )
 
 	if conf.wifi_ap_map:
 		if not getattr(network, 'WLAN', None):
 			p_err('No networking/wifi support detected in micropython firmware, aboring')
 			return p_err('Either remove/clear [wifi] config section or replace device/firmware')
-		tasks.append(asyncio.create_task(
-			wifi_client(conf.wifi_ap_base, conf.wifi_ap_map) ))
+		components.append(wifi_client(conf.wifi_ap_base, conf.wifi_ap_map))
 
 	i2c = dict()
 	if conf.sensor_i2c_freq: i2c['freq'] = conf.sensor_i2c_freq
@@ -310,19 +510,22 @@ async def main():
 		sda=machine.Pin(conf.sensor_i2c_pin_sda),
 		scl=machine.Pin(conf.sensor_i2c_pin_scl), **i2c )
 	sen5x = Sen5x(i2c, conf.sensor_i2c_addr)
-
-	tasks.append(asyncio.create_task(sen5x_poller(
-		sen5x, memoryview(samples),
-		td_data=int(conf.webui_sample_interval * 1000),
+	components.append(sen5x_poller(
+		sen5x, srb, td_data=conf.sensor_sample_interval,
 		td_errs=int(conf.sensor_error_check_interval * 1000),
 		err_rate_limit=token_bucket_iter(conf.sensor_i2c_error_limit),
 		stop=conf.sensor_stop_on_exit,
 		reset=conf.sensor_reset_on_start,
-		verbose=conf.sensor_verbose )))
+		verbose=conf.sensor_verbose ))
 
-	# XXX: webui server task/component
+	if socket:
+		webui = WebUI(srb, verbose=conf.webui_verbose)
+		httpd = await asyncio.start_server( webui.request,
+			'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
+		components.append(webui.run_server(httpd))
+	else: p_err('Socket API not supported in micropython firmware, not starting WebUI')
 
-	try: await asyncio.gather(*tasks)
+	try: await asyncio.gather(*components)
 	finally: print('--- AQM stop ---')
 
 asyncio.run(main())
