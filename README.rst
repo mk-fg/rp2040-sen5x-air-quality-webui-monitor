@@ -4,11 +4,17 @@ RP2040 SEN5x Air Quality WebUI Monitor
 Self-contained micropython_ script for `RP2040-based controllers`_
 (e.g. `Raspberry Pi Pico`_ and its clones, but might work on non-RP2xxx devices too)
 to monitor air quality parameters (VOC, PM1.0, PM2.5, PM4, PM10 and such),
-using connected I2C Sensirion SEN5x sensor (e.g. SEN54_ or `SEN54 in a box`_)
+using connected I²C Sensirion SEN5x sensor (e.g. SEN54_ or `SEN54 in a box`_)
 and display/export that data via basic http web interface, with some charts there.
 
 Device is expected to have a WiFi chip for http access, which is also setup by
 the script from a `simple ini config`_.
+
+Intended use is for temporary home air quality control during forest-fire
+seasons or periods of weather conducive to smog accumulation, and to check which
+measures are effective at minimizing exposure to such pollution in specific areas
+(e.g. how much air circulation to cut off, when to best close windows, effects
+of other factors like air washers and indoor humidity, etc).
 
 .. contents::
   :backlinks: none
@@ -31,7 +37,6 @@ Repository URLs:
 
 How to use this
 ---------------
-
 
 All functionality on the device is implemented by the `main.py script`_,
 which needs following things in order to work:
@@ -57,6 +62,10 @@ which needs following things in order to work:
   and upload using e.g. ``mpremote cp config.ini :`` command (mpremote_ tool).
 
   Might be a good idea to enable all verbose=yes options there for the first run.
+
+  Wi-Fi SSID configuration can be left blank to not configure WLAN interface,
+  in which case script should be able to run on devices that don't have it,
+  logging data to console if verbose=yes is enabled in ``[sensor]`` section.
 
 - Optional step, to actually see data the browser - upload ``webui.js.gz``,
   ``d3.v7.min.js.gz``, ``favicon.ico.gz`` files to the device flash as well.
@@ -115,7 +124,7 @@ Aside from documentation (like this README), useful files in the repository are:
 - main.py_ - micropython script to run on the device.
 
   Runs 3 main components (as asyncio tasks) - WiFi scanner/monitor and
-  SSID-picker, I2C sensor data poller, http server for WebUI and data exports.
+  SSID-picker, I²C sensor data poller, http server for WebUI and data exports.
 
 - config.example.ini_ - example ini_ configuration file with all parameters,
   and comment lines describing what less obvious ones are for.
@@ -167,6 +176,73 @@ Aside from documentation (like this README), useful files in the repository are:
 .. _d3/d3 source repository: https://github.com/d3/d3
 
 
+Data export formats
+-------------------
+
+CSV and binary data exports are available via links at the top of WebUI index page.
+
+**CSV** (`comma-separated values`_ plaintext format, .csv file) should be mostly
+self-descriptive, with the header containing following columns (and data rows
+following that)::
+
+  time_offset, pm10, pm25, pm40, pm100, rh, t, voc, nox
+
+Where ``time_offset`` is a time delta of the sample, in seconds, offset from
+current time, as tracked by the micropython's `time.ticks_ms()`_ monotonic timer.
+Real-Time Clock (RTC) is not used at the moment, as it is not expected to be set,
+so there're only "time from now" offsets available, from the time of http data request,
+likely reflected in creation/modification timestamps on the downloaded CSV file.
+
+Due to device performance limitations, CSV file download might take couple
+seconds, depending on the data size (number of collected samples, limited by
+``sample-count`` config option), as conversion for it is done on the http-server
+side, and is not implemented efficiently in the code.
+
+CSV files are supported by pretty much any data-processing software,
+and can be imported into common spreadsheet apps like `MS Excel`_.
+
+**Binary data export** (.bin file) is much more compact and efficient than
+plaintext CSV above, and consists of concatenated timestamp-sample tuples::
+
+  <data> ::= <data_tuple> <data>
+  <data_tuple> ::= <time_offset_ms [double]> <sen5x_sample>
+  <sen5x_sample> ::=
+    <PM1 µg/m³ *10 [uint16]>
+    <PM2.5 µg/m³ *10 [uint16]>
+    <PM4 µg/m³ *10 [uint16]>
+    <PM10 µg/m³ *10 [uint16]>
+    <relative_humidity % *100 [int16]>
+    <temperature °C *200 [int16]>
+    <VOC *10 [int16]>
+    <NOx *10 [int16]>
+
+Note that ``<sen5x_sample>`` values above are exact raw samples as returned by
+the connected SEN5x sensor over its I²C interface, and are described in
+much more detail in its datasheet (linked on the manufacturer/product page,
+e.g. `from SEN54 product page here`_).
+
+All integer values are big-endian, and should be divided by some coefficient
+(by 10 for PM values, 100 for RH, 200 for T, etc) to produce actual value -
+again, exactly same as described in the sensor datasheet, so check there if in
+doubt as to how to interpret those.
+
+``<time_offset_ms>`` is a big-endian double-precision floating-point negative
+value, with same meaning as ``time_offset`` field in CSV table described above,
+but in milliseconds here instead of seconds.
+
+Such custom binary format should be easy to parse by any code, and is much more
+efficient in pretty much all ways than CSV, especially to generate on a potentially
+underpowered microcontroller, using multiple orders of magnitude less CPU cycles there.
+
+Samples should be returned in most-recent-first order, but with timestamps in there,
+it's more like an implementation detail and shouldn't matter or be relied upon.
+
+.. _comma-separated values: https://en.wikipedia.org/wiki/Comma-separated_values
+.. _MS Excel: https://en.wikipedia.org/wiki/Microsoft_Excel
+.. _time.ticks_ms(): https://docs.micropython.org/en/latest/library/time.html#time.ticks_ms
+.. _from SEN54 product page here: https://sensirion.com/products/catalog/SEN54
+
+
 Links
 -----
 
@@ -187,3 +263,4 @@ TODO
 - Check CSP options for loading d3 from CDN, might be broken.
 - More mobile-friendly WebUI visualizations.
 - Look into adding optional http tls wrapping, for diff variety of browser warnings.
+- Add option to use RTC for keeping track of time, init it from some network source.
