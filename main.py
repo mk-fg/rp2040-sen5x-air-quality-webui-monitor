@@ -1,4 +1,4 @@
-import struct, machine, time
+import os, struct, machine, time
 
 try: import network # required for wifi stuff
 except ImportError: network = None
@@ -32,6 +32,9 @@ class AQMConf:
 	webui_verbose = False
 	webui_port = 80
 	webui_conn_backlog = 5
+	webui_url_prefix = ''
+	webui_d3_api = 7
+	webui_d3_load_from_internet = False
 
 p_err = lambda *a: print('ERROR:', *a) or 1
 err_fmt = lambda err: f'[{err.__class__.__name__}] {err}'
@@ -44,6 +47,41 @@ def token_bucket_iter(spec): # spec = N / M[smhd], e.g. 10 / 15m
 	while (yield tokens >= 0) or (ts_sync := ts):
 		tokens = min( burst, tokens +
 			time.ticks_diff(ts := time.ticks_ms(), ts_sync) * rate ) - 1
+
+# XXX: more mobile-friendly/responsive WebUI
+# webui_head is not templated, so can be full of {}
+webui_head = b'''<!DOCTYPE html>
+<head><meta charset=utf-8><style>
+body { margin: 0 auto; padding: 1em;
+	max-width: 1000px; color: #d2f3ff; background: #09373b; }
+svg g { color: #d2f3ff; }
+svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
+.axis text { fill: currentColor; }
+.grid line { stroke: #275259; }
+.grid .domain { stroke: none; }
+.line { fill: none; }
+.overlay { fill: none; pointer-events: all; }
+.focus line { fill: none; stroke: #81b0da; }
+.focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
+.focus tspan.hl { stroke: #025fb3; }
+</style>'''
+webui_body = b'''
+<title>{title}</title><body><h3>{title}</h3>
+<ul>
+	<li><a href={url_data_csv!r}>Data export in CSV</a>
+	<li><a id=data-url href={url_data_bin!r}>Data export in binary format</a>
+		[ 8B double time-offset ms || 16B SEN5x sample ]*
+</ul>
+<div id=graph><svg></svg></div>
+<script>
+window.aqm_opts = {{
+	d3_api: {d3_api},
+	d3_from_cdn: {d3_from_cdn} }}
+window.aqm_urls = {{
+	data: {url_data_bin!r},
+	d3: {url_js_d3!r} }}
+</script>
+<script type=text/javascript src={url_js!r}></script>'''
 
 
 def conf_parse(conf_file):
@@ -356,7 +394,7 @@ class SampleRingBuffer:
 	def data_samples_raw(self):
 		# Yields (offset_ms, sample_bytes) tuples in reverse-chronological order
 		# Time offsets are positive integers (from now into past), and can be irregular
-		td = time.ticks_diff(time.ticks_ms, self.n_ts or 0)
+		td = time.ticks_diff(time.ticks_ms(), self.n_ts or 0)
 		for chunk in reversed(self.data_chunks()):
 			pos = len(chunk)
 			while (pos := pos - self.sbs) >= 0:
@@ -379,17 +417,43 @@ class SampleRingBuffer:
 class WebUI:
 
 	class Req:
+		prefix, cache_gen = '', 0
 		url_map = dict(
-			# TODO: add /favicon.ico
 			page_index=(b'/', b'/index.html', b'/index.htm'),
+			favicon=(b'/favicon.ico',), js=(b'/webui.js',), js_d3=(b'/d3.v7.min.js',),
 			data_csv=(b'/data/all/latest-first/samples.csv',),
-			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',) )
-		def __init__(self, **kws): self.update(**kws)
+			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',),
+			data_raw=(b'/data/all/latest-first/samples.debug.raw',) )
+		mime_types = dict(js='text/javascript', ico='image/vnd.microsoft.icon')
+		def __init__(self, **kws):
+			self.headers = dict()
+			self.update(**kws)
 		def update(self, **kws):
 			for k,v in kws.items(): setattr(self, k, v)
+		def res_ok(req, cache=None):
+			if cache:
+				etag = 0xcbf29ce484222325 # 64b FNV-1a hash
+				for b in f'{req.cache_gen}.{cache}'.encode():
+					etag = ((etag ^ b) * 0x100000001b3) % 0x10000000000000000
+				etag = f'"{etag.to_bytes(8, "big").hex()}"'.encode()
+				if etag == req.headers.get(b'if-none-match'):
+					req.log and req.log(f'ETag-cache-match-304: {etag.decode()}')
+					req.sout.write(b'HTTP/1.0 304 Not Modified\r\nServer: aqm\r\n\r\n')
+					return
+			req.sout.write(b'HTTP/1.0 200 OK\r\nServer: aqm\r\n')
+			if not cache: req.sout.write(b'Cache-Control: no-cache\r\n')
+			else:
+				req.log and req.log(f'ETag-no-match: {etag.decode()}')
+				req.sout.write(b'ETag: ' + etag + b'\r\n')
+			return True
 
-	def __init__(self, srb, verbose=False):
-		self.srb, self.verbose, self.req_n = srb, verbose, 0
+	def __init__( self, srb, verbose=False,
+			url_prefix=AQMConf.webui_url_prefix,
+			d3_api=AQMConf.webui_d3_api,
+			d3_remote=AQMConf.webui_d3_load_from_internet ):
+		self.srb, self.req_n, self.verbose = srb, 0, verbose
+		self.d3_api, self.d3_remote = d3_api, d3_remote
+		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 
 	async def run_server(self, server):
 		await server.wait_closed()
@@ -397,16 +461,22 @@ class WebUI:
 
 	async def request(self, sin, sout):
 		self.req_n += 1
-		req = self.Req(sin=sin, sout=sout, log=self.verbose and (
-			lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a) ))
+		req = self.Req( sin=sin, sout=sout, prefix=self.url_prefix,
+			log=self.verbose and (lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a)) )
 		req.log and req.log('Connected:', req.sin.get_extra_info('peername'))
 		line = (await sin.readline()).strip()
 		try: req.verb, req.url, req.proto = line.split(None, 2)
 		except ValueError: return req.log and req.log('Req non-http line:', line)
 		req.log and req.log(f'Request: {req.verb.decode()} {req.url.decode()}')
-		while (await req.sin.readline()).strip(): pass # flush headers, if any
+		if self.url_strip and req.url.startswith(self.url_strip):
+			req.url = req.url[len(self.url_strip):]
+		while line := (await req.sin.readline()).strip():
+			k, _, v = line.partition(b':')
+			if v: req.headers[k.strip().lower()] = v.strip().lower()
 		req.sin.close()
-		return await self.req_handler(req)
+		try: return await self.req_handler(req)
+		except OSError as err:
+			if err.errno != 104: raise # ignore ECONNRESET
 
 	async def res_err(self, req, code, msg=''):
 		req.log and req.log(f'Response: http-error-{code} [{msg or "-"}]')
@@ -416,6 +486,25 @@ class WebUI:
 		req.sout.write(b'Server: aqm\r\nContent-Type: text/plain\r\n')
 		req.sout.write(f'Content-Length: {len(body)}\r\n\r\n'.encode())
 		req.sout.write(body); await req.sout.drain(); req.sout.close()
+
+	async def res_static(self, req, p, bs=8192):
+		mime = req.mime_types.get(
+			p.rpartition('.')[-1], 'application/octet-stream' )
+		for p in [f'{p}.gz', p]:
+			try: src = open(p, 'rb'); break
+			except OSError: pass
+		else: return await self.res_err(req, 404, 'File not found')
+		src_mtime, src_bs = os.stat(p)[-1], src.seek(0, 2) # SEEK_END
+		if not req.res_ok(f'{p}.{src_mtime}.{src_bs}'): return
+		req.sout.write(
+			b'Content-Type: {mime}\r\nContent-Length: {bs}\r\n{enc}'
+			.format( mime=mime, bs=src_bs,
+				enc='Content-Encoding: gzip\r\n\r\n' if p.endswith('.gz') else '\r\n' ) )
+		src.seek(0)
+		while True:
+			req.sout.write(src.read(bs))
+			await req.sout.drain()
+			if src.tell() >= src_bs: break
 
 	async def req_handler(self, req):
 		req.ts, req.verb = time.ticks_ms(), req.verb.lower()
@@ -432,36 +521,47 @@ class WebUI:
 		req.log and req.log(f'Done [ {time.ticks_diff(time.ticks_ms(), req.ts):,d} ms]')
 
 	async def req_page_index(self, req):
-		# XXX: add sensor errors here
-		req.sout.write( b'HTTP/1.0 200 OK\r\n'
-			b'Server: aqm\r\nContent-Type: text/html\r\n' )
-		page = b'''<!DOCTYPE html>
-			<meta charset=utf-8><title>{title}</title><body>
-			<h3>{title}</h3>
-			<ul>
-				<li><a href='{url_data_csv}'>Data export in CSV</a>
-				<li><a href='{url_data_bin}'>Data export in binary format</a>
-					[ 8B time-offset ms (0 = latest) || 16B SEN5x sample ]*
-			</ul>
-		'''.strip().replace(b'\n\t\t\t', b'\n').replace(b'\t', b'  ').format(
+		# XXX: add sensor errors on this page
+		if not req.res_ok(): return
+		req.sout.write(b'Content-Type: text/html\r\n')
+		body = webui_body.strip().replace(b'\t', b'  ').format(
 			title='RP2040 SEN5x Air Quality Monitor',
-			**dict((f'url_{k}', url[0].decode()) for k, url in req.url_map.items()) )
-		req.sout.write(f'Content-Length: {len(page)}\r\n\r\n'.encode())
-		req.sout.write(page)
+			d3_api=self.d3_api, d3_from_cdn=int(self.d3_remote),
+			**dict(( f'url_{k}', req.prefix +
+				url[0].decode().lstrip('/') ) for k, url in req.url_map.items()) )
+		page_bs = len(webui_head) + len(body)
+		req.sout.write(f'Content-Length: {page_bs}\r\n\r\n'.encode())
+		req.sout.write(webui_head); req.sout.write(body)
+
+	def req_favicon(self, req): return self.res_static(req, 'favicon.ico')
+	def req_js(self, req): return self.res_static(req, 'webui.js')
+	def req_js_d3(self, req): return self.res_static(req, 'd3.v7.min.js')
 
 	async def req_data_bin(self, req):
-		req.sout.write( b'HTTP/1.0 200 OK\r\n'
-			b'Server: aqm\r\nContent-Type: application/octet-stream\r\n'
-			b'X-Format: [ 8B time-offset ms (0 = latest) || 16B SEN5x sample ]*\r\n' )
-		bs = self.srb.data_samples_count() * (4 + 16)
+		if not req.res_ok(): return
+		req.sout.write(
+			b'Content-Type: application/octet-stream\r\n'
+			b'X-Format: [ 8B double time-offset ms || 16B SEN5x sample ]*\r\n' )
+		bs = self.srb.data_samples_count() * (8 + 16)
 		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
 		for td, sample in self.srb.data_samples_raw():
-			# time-offset ms can overflow here, but should be very unlikely (~50d)
-			req.sout.write(struct.pack('>I16s', td & 0xffffffff, sample))
+			req.sout.write(struct.pack('>d16s', float(td), sample))
+
+	async def req_data_raw(self, req, bs=8192):
+		if not req.res_ok(): return
+		req.sout.write(
+			b'Content-Type: application/octet-stream\r\n'
+			b'X-Format: Raw SampleRingBuffer contents for debugging\r\n' )
+		n, buff_bs = 0, len(buff := self.srb.buff_mv)
+		req.sout.write(f'Content-Length: {buff_bs}\r\n\r\n'.encode())
+		while n < buff_bs:
+			req.sout.write(buff[n:n+bs])
+			await req.sout.drain()
+			n += bs
 
 	async def req_data_csv(self, req):
-		req.sout.write( b'HTTP/1.0 200 OK\r\n'
-			b'Server: aqm\r\nContent-Type: text/csv\r\n' )
+		if not req.res_ok(): return
+		req.sout.write(b'Content-Type: text/csv\r\n')
 		header = b'time_offset, pm10, pm25, pm40, pm100, rh, t, voc, nox\n'
 		line = bytearray( b' 123456.0, 123.0, 123.0,'
 			b' 123.0, 123.0, 12.34, 12.345, 1234.0, 1234.0\n' )
@@ -520,7 +620,9 @@ async def main():
 		verbose=conf.sensor_verbose ))
 
 	if socket:
-		webui = WebUI(srb, verbose=conf.webui_verbose)
+		webui = WebUI( srb,
+			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
+			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet )
 		httpd = await asyncio.start_server( webui.request,
 			'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
 		components.append(webui.run_server(httpd))
