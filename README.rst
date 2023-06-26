@@ -46,7 +46,7 @@ which needs following things in order to work:
   `Download page`_ for it has a silly-long list of supported devices,
   with their own install links/instructions/notes, but on RP2040 it goes something like this:
 
-  - Pick/download the right .uf2 file (e.g. `from rp2-pico-w page`_ for RPi Pico W likes).
+  - Pick/download the right .uf2 file (`from rp2-pico-w page`_ for RPi Pico W likes).
   - Connect tiny board with BOOTSEL switch pressed on boot (or something like it),
     so that it will appear as a USB mass storage device (aka flash drive or usb-stick).
   - Copy UF2 file there, it'll auto-reboot into micropython as soon as copying is done.
@@ -258,9 +258,12 @@ Links
 TODO
 ----
 
+- Add note on how to pre-compile main.py to a more efficient `.mpy file`_.
 - Wiring diagrams, screenshot or somesuch images here.
 - Sensor error flags listed on the index page.
 - Check CSP options for loading d3 from CDN, might be broken.
 - More mobile-friendly WebUI visualizations.
 - Look into adding optional http tls wrapping, for diff variety of browser warnings.
 - Add option to use RTC for keeping track of time, init it from some network source.
+
+.. _.mpy file: https://docs.micropython.org/en/latest/reference/mpyfiles.html
