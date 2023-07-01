@@ -418,12 +418,6 @@ class WebUI:
 
 	class Req:
 		prefix, cache_gen = '', 0
-		url_map = dict(
-			page_index=(b'/', b'/index.html', b'/index.htm'),
-			favicon=(b'/favicon.ico',), js=(b'/webui.js',), js_d3=(b'/d3.v7.min.js',),
-			data_csv=(b'/data/all/latest-first/samples.csv',),
-			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',),
-			data_raw=(b'/data/all/latest-first/samples.debug.raw',) )
 		mime_types = dict(js='text/javascript', ico='image/vnd.microsoft.icon')
 		def __init__(self, **kws):
 			self.headers = dict()
@@ -455,6 +449,12 @@ class WebUI:
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 		self.buff = bytearray(4096); self.buff_mv = memoryview(self.buff)
+		self.req_url_map = dict(
+			page_index=(b'/', b'/index.html', b'/index.htm'), favicon=(b'/favicon.ico',),
+			js=(b'/webui.js',), js_d3=(f'/d3.v{self.d3_api}.min.js'.encode(),),
+			data_csv=(b'/data/all/latest-first/samples.csv',),
+			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',),
+			data_raw=(b'/data/all/latest-first/samples.debug.raw',) )
 
 	async def run_server(self, server):
 		await server.wait_closed()
@@ -462,7 +462,8 @@ class WebUI:
 
 	async def request(self, sin, sout):
 		self.req_n += 1
-		req = self.Req( sin=sin, sout=sout, prefix=self.url_prefix,
+		req = self.Req(
+			sin=sin, sout=sout, prefix=self.url_prefix, url_map=self.req_url_map,
 			log=self.verbose and (lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a)) )
 		req.log and req.log('Connected:', req.sin.get_extra_info('peername'))
 		line = (await sin.readline()).strip()
@@ -540,7 +541,7 @@ class WebUI:
 
 	def req_favicon(self, req): return self.res_static(req, 'favicon.ico')
 	def req_js(self, req): return self.res_static(req, 'webui.js')
-	def req_js_d3(self, req): return self.res_static(req, 'd3.v7.min.js')
+	def req_js_d3(self, req): return self.res_static(req, f'd3.v{self.d3_api}.min.js')
 
 	async def req_data_bin(self, req):
 		if not req.res_ok(): return
