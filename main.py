@@ -108,7 +108,7 @@ def conf_parse(conf_file):
 			scan_interval=float, check_interval=float, key=str,
 			hostname=str, channel=int, reconnects=int, txpower=float,
 			mac=lambda v: v.encode(), hidden=lambda v: bool_map[v],
-			pm=lambda v: network and getattr(network.WLAN, f'PM_{v}') )
+			pm=lambda v: network and getattr(network.WLAN, f'PM_{v.upper()}') )
 		ssid, ap = None, dict()
 		sec.append(('ssid', 'ssid', None)) # close last ssid= section
 		for key_raw, key, val in sec:
