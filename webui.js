@@ -3,7 +3,7 @@
 let opts = window.aqm_opts, urls = window.aqm_urls
 
 let d3js_api = opts.d3_api || 7,
-	d3js_local_load = !opts.d3_from_cdn, // true = try local url first
+	d3js_local_load = opts.d3_try_local || !opts.d3_from_cdn, // true = try local url first
 	d3js_local_url = urls.d3,
 	d3js_remote_load = opts.d3_from_cdn, // false = always use local copy
 	d3js_remote_url = `https://d3js.org/d3.v${d3js_api}.min.js`,

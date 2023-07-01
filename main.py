@@ -54,6 +54,8 @@ webui_head = b'''<!DOCTYPE html>
 <head><meta charset=utf-8><style>
 body { margin: 0 auto; padding: 1em;
 	max-width: 1000px; color: #d2f3ff; background: #09373b; }
+a { color: #5dcef5; }
+a:visited { color: #b092db; }
 svg g { color: #d2f3ff; }
 svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .axis text { fill: currentColor; }
@@ -642,4 +644,5 @@ async def main():
 	try: await asyncio.gather(*components)
 	finally: print('--- AQM stop ---')
 
-asyncio.run(main())
+def run(): asyncio.run(main())
+if __name__ == '__main__': run()

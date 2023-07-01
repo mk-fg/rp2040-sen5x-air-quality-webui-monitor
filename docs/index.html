@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<head>
+<meta charset=utf-8>
+
+<style>
+body { margin: 0 auto; padding: 1em;
+	max-width: 1000px; color: #d2f3ff; background: #09373b; }
+a { color: #5dcef5; }
+a:visited { color: #b092db; }
+svg g { color: #d2f3ff; }
+svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
+.axis text { fill: currentColor; }
+.grid line { stroke: #275259; }
+.grid .domain { stroke: none; }
+.line { fill: none; }
+.overlay { fill: none; pointer-events: all; }
+.focus line { fill: none; stroke: #81b0da; }
+.focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
+.focus tspan.hl { stroke: #025fb3; }
+</style>
+
+<title>RP2040 SEN5x Air Quality Monitor</title>
+<body><h3>RP2040 SEN5x Air Quality Monitor</h3>
+
+<ul>
+	<li><a href='samples.csv'>Data export in CSV</a>
+	<li><a href='samples.8Bms_16Bsen5x_tuples.bin'>Data export in binary format</a>
+		[ 8B double time-offset ms || 16B SEN5x sample ]*
+</ul>
+
+<div id=graph><svg></svg></div>
+
+<script>
+window.aqm_opts = {
+	d3_api: 7,
+	d3_try_local: 1,
+	d3_from_cdn: 1 }
+window.aqm_urls = {
+	data: 'samples.8Bms_16Bsen5x_tuples.bin',
+	d3: 'd3.v7.min.js' }
+</script>
+
+<script src='../webui.js'></script>

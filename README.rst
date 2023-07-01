@@ -25,6 +25,16 @@ Repository URLs:
 - https://codeberg.org/mk-fg/rp2040-sen5x-air-quality-webui-monitor
 - https://fraggod.net/code/git/rp2040-sen5x-air-quality-webui-monitor
 
+Built-in WebUI should look/work something like this:
+
+  https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/index.html
+
+Or here's a screenshot of how it looks, as of bf06d86 / 2023-07-02 (might be old):
+
+.. image:: https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/screenshot.jpg
+   :width: 100%
+   :align: center
+
 .. _micropython: https://docs.micropython.org/en/latest/
 .. _RP2040-based controllers: https://en.wikipedia.org/wiki/RP2040
 .. _Raspberry Pi Pico:
@@ -100,7 +110,11 @@ it will be automatically started when device powers-up (must be named either
 "main.py" or "boot.py" for that), but can be stopped anytime via terminal in the
 same way as with "run" command above - connect and Ctrl-C or soft-reset into REPL_.
 
-See `Repository contents`_ section below for more information on other optional files.
+``main.py`` can also be compiled into an `.mpy module file`_ to take less
+storage space on the flash and start faster - see `Setup to auto-run efficiently
+as .mpy file`_ section below for that.
+
+See `Repository contents`_ below for more information on other optional files.
 
 .. _main.py script: main.py
 .. _Micropython firmware: https://docs.micropython.org/
@@ -114,6 +128,48 @@ See `Repository contents`_ section below for more information on other optional 
 .. _screen: https://wiki.archlinux.org/title/GNU_Screen
 .. _minicom: https://wiki.archlinux.org/title/Working_with_the_serial_console#Making_Connections
 .. _REPL: https://docs.micropython.org/en/latest/reference/repl.html
+.. _.mpy module file: https://docs.micropython.org/en/latest/reference/mpyfiles.html
+
+
+What to connect where with wires
+--------------------------------
+
+Pinout diagram of the device used to run the main script should have I2C
+(aka I²C, IIC) bus pins (SDA/SCL for data/clock), as well as GND and 5V voltage
+pins (or VBUS/VSYS - same thing as 5V for the purposes of connecting the sensor).
+
+SEN5x should be connected to same SDA/SCL I2C pins, powered via VDD/GND pins,
+and have its SEL pin connected to same GND pin as well:
+
+.. image:: https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/wiring-example.jpg
+   :width: 100%
+   :align: center
+
+With `Grove interface`_ on `a packaged SEN54 module`_, it's the same idea -
+yellow/white wires being I2C SCL/SDA respectively, and red/black are VDD/GND ones.
+
+RP2040 have multiple I2C interfaces, which can be exposed on different pins, all
+of which must be specified correctly in the ``config.ini`` file uploaded to flash,
+using GP<n> numbers for pins (e.g. 0 as in GP0 instead of number for a physical pin).
+
+For example, with wiring as per `image above`_, following values should be used there::
+
+  [sensor]
+  i2c-n = 0
+  i2c-pin-sda = 0
+  i2c-pin-scl = 1
+
+Board pinouts can usually be found on the vendor site, like `here for RPi Pico W`_.
+
+There is also more info on such stuff in datasheets for these devices.
+
+.. _here for RPi Pico W:
+  https://www.raspberrypi.com/documentation/microcontrollers/raspberry-pi-pico.html#pinout-and-design-files-2
+.. _Grove interface:
+  https://wiki.seeedstudio.com/Grove_System/#interface-of-grove-modules
+.. _a packaged SEN54 module:
+  https://www.seeedstudio.com/Grove-All-in-one-Environmental-Sensor-SEN54-p-5374.html
+.. _image above: https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/wiring-example.jpg
 
 
 Repository contents
@@ -243,6 +299,69 @@ it's more like an implementation detail and shouldn't matter or be relied upon.
 .. _from SEN54 product page here: https://sensirion.com/products/catalog/SEN54
 
 
+Setup to auto-run efficiently as .mpy file
+------------------------------------------
+
+main.py is a python script, which normally micropython would have to `parse and
+then byte-compile`_ every time before running.
+
+This is useful for testing changes in the script using e.g. ``mpremote run ...``
+without extra steps, but when running same script every time board boots,
+it's a waste of time, and can be skipped by pre-compiling the script
+into .mpy module, which will take less extra work to load.
+
+It can be done something like this:
+
+- Build/install `mpy-cross tool`_ - maybe from an OS package, or from sources.
+
+  It has no significant dependencies, usual "make" should produce
+  ``./build/mpy-cross`` binary (see also `Arch PKGBUILD for it here`_).
+
+  .. _mpy-cross tool: https://github.com/micropython/micropython/tree/master/mpy-cross
+  .. _Arch PKGBUILD for it here:
+    https://github.com/mk-fg/archlinux-pkgbuilds/blob/master/mpy-cross/PKGBUILD
+
+- Run ``mpy-cross -march=armv6m -O2 main.py -o aqm.mpy`` to build ``aqm.mpy``
+  module file.
+
+  See `official docs on .mpy files`_ for more info on picking compiler options above.
+
+  .. _official docs on .mpy files:
+    https://docs.micropython.org/en/latest/reference/mpyfiles.html#versioning-and-compatibility-of-mpy-files
+
+- Upload produced ``aqm.mpy`` file and test-run it::
+
+    % mpremote cp aqm.mpy :
+    % mpremote exec 'import aqm; aqm.run()'
+
+  Should run it same as ``mpremote run main.py``, just a bit faster,
+  without any errors or issues.
+
+- Make and upload loader file to run ``aqm.mpy`` on board boot.
+
+  Same code as in "exec" command above can be uploaded to ``main.py`` file on
+  the board's flash storage to import/run ``aqm.mpy`` on boot::
+
+    % echo 'import aqm; aqm.run()' >loader.py
+    % mpremote cp loader.py :main.py
+
+- ``mpremote reset`` or power-cycle device, check that everything runs correctly.
+
+  If verbose logging is enabled, running ``mpremote`` or connecting to device
+  usb-tty should have the same output there as when test-running main.py earlier.
+
+Even more optimization can be done by embedding "frozen bytecode" into board's
+micropython firmware image using a manifest file, in which case it will run
+directly from flash storage and not use RAM for that - faster, and leaving more
+memory to buffer samples (by about 15 KiB I think), but a bit more hassle to
+build/upload - see documentation on `MicroPython manifest files`_ for how to do it.
+
+.. _parse and then byte-compile:
+  https://docs.micropython.org/en/latest/reference/constrained.html#compilation-phase
+.. _MicroPython manifest files:
+  https://docs.micropython.org/en/latest/reference/manifest.html
+
+
 Links
 -----
 
@@ -258,12 +377,8 @@ Links
 TODO
 ----
 
-- Add note on how to pre-compile main.py to a more efficient `.mpy file`_.
-- Wiring diagrams, screenshot or somesuch images here.
 - Sensor error flags listed on the index page.
 - Check CSP options for loading d3 from CDN, might be broken.
 - More mobile-friendly WebUI visualizations.
 - Look into adding optional http tls wrapping, for diff variety of browser warnings.
 - Add option to use RTC for keeping track of time, init it from some network source.
-
-.. _.mpy file: https://docs.micropython.org/en/latest/reference/mpyfiles.html
