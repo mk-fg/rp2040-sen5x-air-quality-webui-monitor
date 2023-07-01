@@ -283,6 +283,7 @@ async def sen5x_poller(
 	if reset: await sen5x('reset')
 	await sen5x('meas_start')
 	p_log and p_log('Started measurement mode')
+	await asyncio.sleep(1) # avoids unnecessary data_ready checks
 	try:
 		err_last = ValueError('Invalid error rate-limiter settings')
 		while next(err_rate_limit):
