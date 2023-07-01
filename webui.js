@@ -159,7 +159,7 @@ Focus: {
 		.on('mouseover', (ev, d) => focus.style('display', null))
 		.on('mouseout', (ev, d) => { focus.style('display', 'none'); focus_hl_line() })
 		.on('mousemove', (ev, d) => {
-			if (!data.length) return
+			if (data.length < 2) return
 			let [px, py] = d3.pointer(ev),
 				x0 = x.invert(px), n = x_bisect(data, x0, 1)
 			if (x0 - data[n-1].ts <= data[n] - x0) n -= 1

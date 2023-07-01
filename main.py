@@ -427,18 +427,20 @@ class WebUI:
 			for k,v in kws.items(): setattr(self, k, v)
 		def res_ok(req, cache=None):
 			if cache:
+				etag_header = req.headers.get(b'if-none-match', b'-no-header-')
 				etag = 0xcbf29ce484222325 # 64b FNV-1a hash
 				for b in f'{req.cache_gen}.{cache}'.encode():
 					etag = ((etag ^ b) * 0x100000001b3) % 0x10000000000000000
 				etag = f'"{etag.to_bytes(8, "big").hex()}"'.encode()
-				if etag == req.headers.get(b'if-none-match'):
+				if etag == etag_header:
 					req.log and req.log(f'ETag-cache-match-304: {etag.decode()}')
 					req.sout.write(b'HTTP/1.0 304 Not Modified\r\nServer: aqm\r\n\r\n')
 					return
 			req.sout.write(b'HTTP/1.0 200 OK\r\nServer: aqm\r\n')
 			if not cache: req.sout.write(b'Cache-Control: no-cache\r\n')
 			else:
-				req.log and req.log(f'ETag-no-match: {etag.decode()}')
+				req.log and req.log( 'ETag-cache-miss:'
+					f' {etag.decode()} (data) vs {etag_header.decode()} (request)' )
 				req.sout.write(b'ETag: ' + etag + b'\r\n')
 			return True
 
@@ -449,7 +451,7 @@ class WebUI:
 		self.srb, self.req_n, self.verbose = srb, 0, verbose
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
-		self.buff = bytearray(4096); self.buff_mv = memoryview(self.buff)
+		self.buff = bytearray(2048); self.buff_mv = memoryview(self.buff)
 		self.req_url_map = dict(
 			page_index=(b'/', b'/index.html', b'/index.htm'), favicon=(b'/favicon.ico',),
 			js=(b'/webui.js',), js_d3=(f'/d3.v{self.d3_api}.min.js'.encode(),),
@@ -551,8 +553,9 @@ class WebUI:
 			b'X-Format: [ 8B double time-offset ms || 16B SEN5x sample ]*\r\n' )
 		bs = self.srb.data_samples_count() * (8 + 16)
 		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
-		for td, sample in self.srb.data_samples_raw():
+		for n, (td, sample) in enumerate(self.srb.data_samples_raw()):
 			req.sout.write(struct.pack('>d16s', float(td), sample))
+			if not n % 80: await req.sout.drain()
 
 	async def req_data_raw(self, req):
 		if not req.res_ok(): return
@@ -578,7 +581,7 @@ class WebUI:
 		# for f in line.rstrip().split(b','): fields.append((n, m:=len(f))); n+=m+1
 		fields = (0,9),(10,6),(17,6),(24,6),(31,6),(38,6),(45,7),(53,7),(61,7)
 		fmt = dict((vlen, f'{{:>{vlen}}}') for pos,vlen in fields)
-		for ts, sample in self.srb.data_samples():
+		for n, (ts, sample) in enumerate(self.srb.data_samples()):
 			vals = (abs(ts),) + sample
 			for v, (pos, vlen) in zip(vals, fields):
 				if v is None: vs = b''
@@ -591,6 +594,7 @@ class WebUI:
 					vs = vs.rstrip('.').encode()
 				line[pos:pos+vlen] = fmt[vlen].format(vs).encode()
 			req.sout.write(line)
+			if not n % 20: await req.sout.drain()
 
 
 async def main():
