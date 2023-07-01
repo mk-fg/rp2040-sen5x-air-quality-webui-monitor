@@ -76,7 +76,7 @@ Data: {
 
 // Chart
 
-let margin = {top: 0, right: 130, bottom: 50, left: 70},
+let margin = {top: 20, right: 130, bottom: 50, left: 70},
 	width = 960 - margin.left - margin.right,
 	height = 700 - margin.top - margin.bottom,
 	x = d3.scaleTime().range([0, width]).domain(d3.extent(data, d => d.ts)),
@@ -142,8 +142,8 @@ Focus: {
 		del_ps = data.map(d => dss.map(ds => [x(d.ts), ys[ds.k](d[ds.k]), ds])).flat(),
 		del = d3.Delaunay.from(del_ps)
 	// vis.append('g').selectAll('path').data(del.voronoi([0, 0, width, height]).cellPolygons())
-	// 	.join(en => en.append('path')
-	// 		.attr('stroke', 'red').attr('fill', 'none'), upd => upd, ex => ex.remove())
+	// 	.join( en => en.append('path').attr('stroke', 'red')
+	// 		.attr('fill', 'none'), upd => upd, ex => ex.remove() )
 	// 	.attr('d', d => d ? 'M' + d.join('L') + 'Z' : null)
 
 	let fmt_n = n => n.toFixed(1),

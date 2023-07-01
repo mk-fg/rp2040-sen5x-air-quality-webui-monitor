@@ -454,6 +454,7 @@ class WebUI:
 		self.srb, self.req_n, self.verbose = srb, 0, verbose
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
+		self.buff = bytearray(4096); self.buff_mv = memoryview(self.buff)
 
 	async def run_server(self, server):
 		await server.wait_closed()
@@ -474,9 +475,12 @@ class WebUI:
 			k, _, v = line.partition(b':')
 			if v: req.headers[k.strip().lower()] = v.strip().lower()
 		req.sin.close()
-		try: return await self.req_handler(req)
+		try: await self.req_handler(req)
 		except OSError as err:
 			if err.errno != 104: raise # ignore ECONNRESET
+		finally:
+			req.sout.close() # in case req_handler failed
+			await asyncio.gather(req.sin.wait_closed(), req.sout.wait_closed())
 
 	async def res_err(self, req, code, msg=''):
 		req.log and req.log(f'Response: http-error-{code} [{msg or "-"}]')
@@ -487,7 +491,7 @@ class WebUI:
 		req.sout.write(f'Content-Length: {len(body)}\r\n\r\n'.encode())
 		req.sout.write(body); await req.sout.drain(); req.sout.close()
 
-	async def res_static(self, req, p, bs=8192):
+	async def res_static(self, req, p):
 		mime = req.mime_types.get(
 			p.rpartition('.')[-1], 'application/octet-stream' )
 		for p in [f'{p}.gz', p]:
@@ -502,8 +506,9 @@ class WebUI:
 				enc='Content-Encoding: gzip\r\n\r\n' if p.endswith('.gz') else '\r\n' ) )
 		src.seek(0)
 		while True:
-			req.sout.write(src.read(bs))
-			await req.sout.drain()
+			if n := src.readinto(self.buff_mv):
+				req.sout.write(self.buff_mv[:n])
+				await req.sout.drain()
 			if src.tell() >= src_bs: break
 
 	async def req_handler(self, req):
@@ -547,12 +552,12 @@ class WebUI:
 		for td, sample in self.srb.data_samples_raw():
 			req.sout.write(struct.pack('>d16s', float(td), sample))
 
-	async def req_data_raw(self, req, bs=8192):
+	async def req_data_raw(self, req):
 		if not req.res_ok(): return
 		req.sout.write(
 			b'Content-Type: application/octet-stream\r\n'
 			b'X-Format: Raw SampleRingBuffer contents for debugging\r\n' )
-		n, buff_bs = 0, len(buff := self.srb.buff_mv)
+		n, buff_bs, bs = 0, len(buff := self.srb.buff_mv), len(self.buff)
 		req.sout.write(f'Content-Length: {buff_bs}\r\n\r\n'.encode())
 		while n < buff_bs:
 			req.sout.write(buff[n:n+bs])
