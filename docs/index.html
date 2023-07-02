@@ -17,6 +17,10 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .focus line { fill: none; stroke: #81b0da; }
 .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
 .focus tspan.hl { stroke: #025fb3; }
+.errors { list-style: none; width: 40rem; padding: 0; }
+.errors li { background: #9b2220; font-weight: bold;
+	margin: .5rem; padding: .5rem 1rem; border-radius: .4rem; }
+.errors li::before { content: '⚠️'; margin-right: .4rem; }
 </style>
 
 <title>RP2040 SEN5x Air Quality Monitor</title>
@@ -27,6 +31,11 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 	<li><a href='samples.8Bms_16Bsen5x_tuples.bin'>Data export in binary format</a>
 		[ 8B double time-offset ms || 16B SEN5x sample ]*
 </ul>
+
+<!-- <ul class=errors> -->
+<!-- 	<li>Some test error message from sensor</li> -->
+<!-- 	<li>Some other error</li> -->
+<!-- </ul> -->
 
 <div id=graph><svg></svg></div>
 

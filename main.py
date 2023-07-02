@@ -66,7 +66,12 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .focus line { fill: none; stroke: #81b0da; }
 .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
 .focus tspan.hl { stroke: #025fb3; }
+.errors { list-style: none; width: 40rem; padding: 0; }
+.errors li { background: #9b2220; font-weight: bold;
+	margin: .5rem; padding: .5rem 1rem; border-radius: .4rem; }
+.errors li::before { content: '⚠️'; margin-right: .4rem; }
 </style>'''
+
 webui_body = b'''
 <title>{title}</title><body><h3>{title}</h3>
 <ul>
@@ -74,6 +79,7 @@ webui_body = b'''
 	<li><a id=data-url href={url_data_bin!r}>Data export in binary format</a>
 		[ 8B double time-offset ms || 16B SEN5x sample ]*
 </ul>
+{err_msgs}
 <div id=graph><svg></svg></div>
 <script>
 window.aqm_opts = {{
@@ -84,6 +90,13 @@ window.aqm_urls = {{
 	d3: {url_js_d3!r} }}
 </script>
 <script type=text/javascript src={url_js!r}></script>'''
+
+webui_err_msgs = dict(
+	warn_fan_speed='Fan - speed out of range',
+	err_gas='Gas sensor error (VOC/NOx)',
+	err_rht='RHT (temp/humidity) sensor communication error',
+	err_laser='Laser failure',
+	err_fan='Fan - mechanical failure (blocked/broken)' )
 
 
 def conf_parse(conf_file):
@@ -347,8 +360,8 @@ class SampleRingBuffer:
 	#   decrementing timestamp by regular delta + decoded blk_skip values (if any).
 
 	blk_skip = b'\xff\xfe\0\0' # two first impossible-values to mark time-skip blocks
-	sbs, ebs = Sen5x.sample_bs, Sen5x.errs_bs # binary sen5x sample params
-	s0, s_parse = ebs, staticmethod(Sen5x.sample_parse)
+	sbs, ebs, s0 = Sen5x.sample_bs, Sen5x.errs_bs, Sen5x.errs_bs # binary sample params
+	s_parse, errs_parse = staticmethod(Sen5x.sample_parse), staticmethod(Sen5x.errs_parse)
 
 	def __init__(self, td_ms, count):
 		self.n = self.n_loops = self.n_skips = 0
@@ -415,6 +428,9 @@ class SampleRingBuffer:
 		# Current timestamp to offset all samples from must be provided, or will be 0
 		for td_ms, sample_raw in self.data_samples_raw():
 			yield (ts_now - (td_ms / 1000), self.s_parse(sample_raw))
+
+	def data_errors(self): # returns tuple of error strings, if any
+		return self.errs_parse(self.buff_mv[:self.s0])
 
 
 class WebUI:
@@ -532,11 +548,15 @@ class WebUI:
 		req.log and req.log(f'Done [ {time.ticks_diff(time.ticks_ms(), req.ts):,d} ms]')
 
 	async def req_page_index(self, req):
-		# XXX: add sensor errors on this page
 		if not req.res_ok(): return
 		req.sout.write(b'Content-Type: text/html\r\n')
+		if err_msgs := self.srb.data_errors() or '':
+			err_msgs = '\n'.join(
+				f'<li>{webui_err_msgs.get(err) or "Unknown error [{}]".format(err)}</li>'
+				for err in err_msgs )
+			err_msgs = f'<ul class=errors>\n{err_msgs}\n</ul>'
 		body = webui_body.strip().replace(b'\t', b'  ').format(
-			title='RP2040 SEN5x Air Quality Monitor',
+			title='RP2040 SEN5x Air Quality Monitor', err_msgs=err_msgs,
 			d3_api=self.d3_api, d3_from_cdn=int(self.d3_remote),
 			**dict(( f'url_{k}', req.prefix +
 				url[0].decode().lstrip('/') ) for k, url in req.url_map.items()) )

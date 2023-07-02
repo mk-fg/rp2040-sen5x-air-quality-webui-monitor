@@ -377,8 +377,8 @@ Links
 TODO
 ----
 
-- Sensor error flags listed on the index page.
 - Check CSP options for loading d3 from CDN, might be broken.
 - More mobile-friendly WebUI visualizations.
 - Look into adding optional http tls wrapping, for diff variety of browser warnings.
 - Add option to use RTC for keeping track of time, init it from some network source.
+- Expose fan self-cleaning switch/toggle somewhere, to run 1/week or so.
