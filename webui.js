@@ -86,7 +86,10 @@ let margin = {top: 20, right: 130, bottom: 50, left: 70},
 		dss.map(ds => [ ds.k, ds_pmx.includes(ds.k) ? y_pmx :
 			d3.scaleLinear().range([height, 0]).domain(d3.extent(data.map(d => d[ds.k]))) ]) ),
 	ax = () => d3.axisBottom(x).ticks(8),
-	ay_pmx = () => d3.axisLeft(y_pmx) // main Y axis
+	ay_pmx = () => d3.axisLeft(y_pmx), // main Y axis
+	ts_now_label = new Intl.DateTimeFormat('sv-SE', {
+		timeZone: fmt_ts_tz, hour: '2-digit', minute: '2-digit',
+		second: '2-digit', hour12: false }).format() + ' now'
 
 let vis = d3.select('body svg')
 		.attr('width', width + margin.left + margin.right)
@@ -105,7 +108,7 @@ let vis = d3.select('body svg')
 			.attr('transform', `translate(${width} 0)`)
 			.attr('dx', '-1em').attr('dy', '3em')
 			.style('text-anchor', 'end').text(
-				`Date/time in local/browser timezone (${fmt_ts_tz})` ) )
+				`Date/time in local/browser timezone (${fmt_ts_tz}, ${ts_now_label})` ) )
 	.call( s => s
 		.append('g').attr('class', 'y axis').call(ay_pmx())
 		.append('text')

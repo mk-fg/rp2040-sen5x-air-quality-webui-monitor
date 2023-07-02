@@ -379,6 +379,8 @@ TODO
 
 - Check CSP options for loading d3 from CDN, might be broken.
 - More mobile-friendly WebUI visualizations.
+- Maybe use RTC for keeping track of time, init from JS header.
+- Expose fan self-cleaning switch/toggle somewhere, to run once/week or so.
 - Look into adding optional http tls wrapping, for diff variety of browser warnings.
-- Add option to use RTC for keeping track of time, init it from some network source.
-- Expose fan self-cleaning switch/toggle somewhere, to run 1/week or so.
+- Robust error wrapping in WebUI, displaying last exception or component failure there.
+- Enable WDT, if available on RP2040, displaying reboots via it as an error in WebUI.
