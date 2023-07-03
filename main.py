@@ -84,7 +84,6 @@ webui_body = b'''
 <ul id=exports>
 	<li><a href={url_data_csv!r}>Data export in CSV</a>
 	<li><a id=data-url href={url_data_bin!r}>Data export in binary format</a>
-		[ 8B double time-offset ms || 16B SEN5x sample ]*
 </ul>
 {sen_actions}
 {err_msgs}
@@ -576,12 +575,12 @@ class WebUI:
 		if not req.res_ok(): return
 		req.sout.write(b'Content-Type: text/html\r\n')
 		if sen_actions := next(self.act_fan_clean_iter):
-			sen_actions = ( '<ul id=actions>\n<li><a href=\'{url}\'>'
-					'Run fan cleaning</a> (at least every week)</li>\n</ul>'
+			sen_actions = ( '<ul id=actions>\n<li>'
+					'<a href=\'{url}\'>Run fan cleaning</a> (at least every week)\n</ul>'
 				.format(url=req.url_links['act_fan_clean']) )
 		if err_msgs := self.srb.data_errors():
 			err_msgs = '\n'.join(
-				f'<li>{webui_err_msgs.get(err) or "Unknown error [{}]".format(err)}</li>'
+				f'<li>{webui_err_msgs.get(err) or "Unknown error [{}]".format(err)}'
 				for err in err_msgs )
 			err_msgs = f'<ul id=errors>\n{err_msgs}\n</ul>'
 		body = webui_body.strip().replace(b'\t', b'  ').format(
@@ -652,7 +651,7 @@ class WebUI:
 			return await self.res_err(req, 503, 'Rate limit exceeded')
 		await fan_clean_func()
 		req.sout.write(b'HTTP/1.0 302 Found\r\n')
-		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n')
+		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
 
 
 async def main():
