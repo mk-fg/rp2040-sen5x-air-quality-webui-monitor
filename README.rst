@@ -161,7 +161,7 @@ For example, with wiring as per `image above`_, following values should be used 
 
 Board pinouts can usually be found on the vendor site, like `here for RPi Pico W`_.
 
-There is also more info on such stuff in datasheets for these devices.
+There is also more info on pinouts, wiring and electrical stuff in datasheets for these devices.
 
 .. _here for RPi Pico W:
   https://www.raspberrypi.com/documentation/microcontrollers/raspberry-pi-pico.html#pinout-and-design-files-2
@@ -177,7 +177,7 @@ Repository contents
 
 Aside from documentation (like this README), useful files in the repository are:
 
-- main.py_ - micropython script to run on the device.
+- `main.py <main.py>`_ - micropython script to run on the device.
 
   Runs 3 main components (as asyncio tasks) - WiFi scanner/monitor and
   SSID-picker, I²C sensor data poller, http server for WebUI and data exports.
@@ -189,7 +189,7 @@ Aside from documentation (like this README), useful files in the repository are:
   to upload to RP2xxx, but can be also useful to track changes in wrt new features,
   modified defaults and such, when updating to new code from this repo.
 
-- webui.js_ - JavaScript frontend code for WebUI data visualization.
+- `webui.js <webui.js>`_ - JavaScript frontend code for WebUI data visualization.
 
   Sent and runs in the browser as-is, fetches current data in binary format on
   page load, and creates interactive visualization (graphs) for it inside <svg> box.
@@ -225,9 +225,14 @@ Aside from documentation (like this README), useful files in the repository are:
   is intended to work with, but newer ones can be selected via ``d3-api = ...``
   opt in ``config.ini``.
 
-.. _main.py: main.py
+- `docs/ <docs>`_ - images and examples used in this README file, as well as any
+  dev helper scripts.
+
+  ``./docs/run-webui-http-server.py`` can be used to run a testing http server
+  (on http://localhost:8000 ), with same WebUI as on devices and some example data,
+  to tweak frontend JS easily.
+
 .. _ini: https://en.wikipedia.org/wiki/INI_file
-.. _webui.js: webui.js
 .. _D3.js: https://d3js.org/
 .. _d3/d3 source repository: https://github.com/d3/d3
 
