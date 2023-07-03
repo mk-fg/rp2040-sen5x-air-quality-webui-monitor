@@ -21,6 +21,7 @@ class AQMConf:
 	sensor_reset_on_start = False
 	sensor_stop_on_exit = True
 	sensor_error_check_interval = 3701.0
+	sensor_fan_clean_min_interval = 24 * 3600.0
 	sensor_i2c_n = -1
 	sensor_i2c_pin_sda = -1
 	sensor_i2c_pin_scl = -1
@@ -48,12 +49,15 @@ def token_bucket_iter(spec): # spec = N / M[smhd], e.g. 10 / 15m
 		tokens = min( burst, tokens +
 			time.ticks_diff(ts := time.ticks_ms(), ts_sync) * rate ) - 1
 
+def val_iter(val=None): # placeholder for iterators
+	while True: yield val
+
 # XXX: more mobile-friendly/responsive WebUI
 # webui_head is not templated, so can be full of {}
 webui_head = b'''<!DOCTYPE html>
 <head><meta charset=utf-8><style>
 body { margin: 0 auto; padding: 1em;
-	max-width: 1000px; color: #d2f3ff; background: #09373b; }
+	max-width: 960px; color: #d2f3ff; background: #09373b; }
 a { color: #5dcef5; }
 a:visited { color: #b092db; }
 svg g { color: #d2f3ff; }
@@ -66,19 +70,23 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .focus line { fill: none; stroke: #81b0da; }
 .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
 .focus tspan.hl { stroke: #025fb3; }
-.errors { list-style: none; width: 40rem; padding: 0; }
-.errors li { background: #9b2220; font-weight: bold;
+#exports { float: left; }
+#actions { float: right; }
+#errors { clear: both; width: 40rem; list-style: none; padding: 0; }
+#errors li { background: #9b2220; font-weight: bold;
 	margin: .5rem; padding: .5rem 1rem; border-radius: .4rem; }
-.errors li::before { content: '⚠️'; margin-right: .4rem; }
+#errors li::before { content: '⚠️'; margin-right: .4rem; }
+#graph { clear: both; }
 </style>'''
 
 webui_body = b'''
 <title>{title}</title><body><h3>{title}</h3>
-<ul>
+<ul id=exports>
 	<li><a href={url_data_csv!r}>Data export in CSV</a>
 	<li><a id=data-url href={url_data_bin!r}>Data export in binary format</a>
 		[ 8B double time-offset ms || 16B SEN5x sample ]*
 </ul>
+{sen_actions}
 {err_msgs}
 <div id=graph><svg></svg></div>
 <script>
@@ -226,11 +234,12 @@ class Sen5x:
 		meas_start=(b'\x00!', 0.05),
 		meas_stop = (b'\x01\x04', 0.16),
 		reset = (b'\xd3\x04', 0.1),
+		clean_fan = (b'\x56\x07', 0.02),
 		data_ready = (b'\x02\x02', 0.02, 3, lambda rx: rx[1] != 0),
 		data_read = (b'\x03\xc4', 0.02, sample_bs + sample_bs // 2, _sample),
 		errs_read = (b'\xd2\x06', 0.02, errs_bs + errs_bs // 2, _errs),
 		errs_read_clear = (b'\xd2\x10', 0.02, errs_bs + errs_bs // 2, _errs),
-		get_name = (b'\xd0\x14', 0.02, 48, lambda rx: rx.rstrip(b'\0').decode()) )
+		get_serial = (b'\xd0\x33', 0.02, 48, lambda rx: rx.rstrip(b'\0').decode()) )
 
 	crc_map = ( # precalculated for poly=0x31 init=0xff xor=0
 		b'\x001bS\xc4\xf5\xa6\x97\xb9\x88\xdb\xea}L\x1f.Cr!\x10\x87\xb6\xe5\xd4'
@@ -256,7 +265,6 @@ class Sen5x:
 		else:
 			cmd, delay, rx_bytes, rx_parser = cmd
 			if not parse: rx_parser = None
-		# print('i2c [cmd]', cmd_name, cmd, delay, rx_bytes, rx_parser)
 		await self.cmd_lock.acquire()
 		try: return await self._run(cmd, delay, rx_bytes, rx_parser, buff)
 		except OSError as err: raise self.Sen5xError(f'I2C I/O failure: {err_fmt(err)}')
@@ -290,6 +298,16 @@ class Sen5x:
 		elif delay: # only needed if commands closely follow each other
 			self.cmd_ms_last, self.cmd_ts_wait = time.ticks_ms(), int(delay * 1000)
 
+	def fan_clean_func_iter(self, td_min):
+		ts_wait, clean_func = list(), lambda: ( None if ts_wait
+			else (ts_wait.append(time.ticks_ms()), self('clean_fan'))[1] )
+		while True:
+			if ts_wait:
+				if time.ticks_diff(time.ticks_ms(), ts_wait[-1]) < td_min:
+					yield; continue
+				ts_wait.clear()
+			yield clean_func
+
 
 async def sen5x_poller(
 		sen5x, srb, td_data, td_errs, err_rate_limit,
@@ -321,7 +339,9 @@ async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
 		ts = ts_loop = time.ticks_ms()
 
 		if ts_data < 0 or (td1 := td_data - time.ticks_diff(ts, ts_data)) < td_slack:
-			if ts_data < 0 or td_data <= 1000:
+			if ts_data < 0 or td_data <= 1500:
+				# Data might not be ready if fan auto-cleanup is running,
+				#  but null-returns are handled, so it's same missing values.
 				while not await sen5x('data_ready'):
 					p_log and p_log('data_ready delay')
 					await asyncio.sleep_ms(200)
@@ -465,17 +485,22 @@ class WebUI:
 	def __init__( self, srb, verbose=False,
 			url_prefix=AQMConf.webui_url_prefix,
 			d3_api=AQMConf.webui_d3_api,
-			d3_remote=AQMConf.webui_d3_load_from_internet ):
+			d3_remote=AQMConf.webui_d3_load_from_internet,
+			fan_clean_func_iter=val_iter() ):
 		self.srb, self.req_n, self.verbose = srb, 0, verbose
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 		self.buff = bytearray(2048); self.buff_mv = memoryview(self.buff)
+		self.act_fan_clean_iter = fan_clean_func_iter
 		self.req_url_map = dict(
 			page_index=(b'/', b'/index.html', b'/index.htm'), favicon=(b'/favicon.ico',),
 			js=(b'/webui.js',), js_d3=(f'/d3.v{self.d3_api}.min.js'.encode(),),
 			data_csv=(b'/data/all/latest-first/samples.csv',),
 			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',),
-			data_raw=(b'/data/all/latest-first/samples.debug.raw',) )
+			data_raw=(b'/data/all/latest-first/samples.debug.raw',),
+			act_fan_clean=(b'/fan-clean',) )
+		self.req_url_links = dict(( k, self.url_prefix +
+			url[0].decode().lstrip('/') ) for k, url in self.req_url_map.items())
 
 	async def run_server(self, server):
 		await server.wait_closed()
@@ -483,8 +508,8 @@ class WebUI:
 
 	async def request(self, sin, sout):
 		self.req_n += 1
-		req = self.Req(
-			sin=sin, sout=sout, prefix=self.url_prefix, url_map=self.req_url_map,
+		req = self.Req( sin=sin, sout=sout,
+			url_map=self.req_url_map, url_links=self.req_url_links,
 			log=self.verbose and (lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a)) )
 		req.log and req.log('Connected:', req.sin.get_extra_info('peername'))
 		line = (await sin.readline()).strip()
@@ -550,16 +575,20 @@ class WebUI:
 	async def req_page_index(self, req):
 		if not req.res_ok(): return
 		req.sout.write(b'Content-Type: text/html\r\n')
-		if err_msgs := self.srb.data_errors() or '':
+		if sen_actions := next(self.act_fan_clean_iter):
+			sen_actions = ( '<ul id=actions>\n<li><a href=\'{url}\'>'
+					'Run fan cleaning</a> (at least every week)</li>\n</ul>'
+				.format(url=req.url_links['act_fan_clean']) )
+		if err_msgs := self.srb.data_errors():
 			err_msgs = '\n'.join(
 				f'<li>{webui_err_msgs.get(err) or "Unknown error [{}]".format(err)}</li>'
 				for err in err_msgs )
-			err_msgs = f'<ul class=errors>\n{err_msgs}\n</ul>'
+			err_msgs = f'<ul id=errors>\n{err_msgs}\n</ul>'
 		body = webui_body.strip().replace(b'\t', b'  ').format(
-			title='RP2040 SEN5x Air Quality Monitor', err_msgs=err_msgs,
+			title='RP2040 SEN5x Air Quality Monitor',
+			sen_actions=sen_actions or '', err_msgs=err_msgs or '',
 			d3_api=self.d3_api, d3_from_cdn=int(self.d3_remote),
-			**dict(( f'url_{k}', req.prefix +
-				url[0].decode().lstrip('/') ) for k, url in req.url_map.items()) )
+			**dict((f'url_{k}', url) for k, url in req.url_links.items()) )
 		page_bs = len(webui_head) + len(body)
 		req.sout.write(f'Content-Length: {page_bs}\r\n\r\n'.encode())
 		req.sout.write(webui_head); req.sout.write(body)
@@ -618,6 +647,13 @@ class WebUI:
 			req.sout.write(line)
 			if not n % 20: await req.sout.drain()
 
+	async def req_act_fan_clean(self, req):
+		if not (fan_clean_func := next(self.act_fan_clean_iter)):
+			return await self.res_err(req, 503, 'Rate limit exceeded')
+		await fan_clean_func()
+		req.sout.write(b'HTTP/1.0 302 Found\r\n')
+		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n')
+
 
 async def main():
 	print('--- AQM start ---')
@@ -655,7 +691,9 @@ async def main():
 	if socket:
 		webui = WebUI( srb,
 			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
-			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet )
+			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet,
+			fan_clean_func_iter=sen5x.fan_clean_func_iter(
+				int(conf.sensor_fan_clean_min_interval * 1000) ) )
 		httpd = await asyncio.start_server( webui.request,
 			'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
 		components.append(webui.run_server(httpd))
