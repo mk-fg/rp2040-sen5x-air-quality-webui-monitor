@@ -14,7 +14,10 @@ Intended use is for temporary home air quality control during forest-fire
 seasons or periods of weather conducive to smog accumulation, and to check which
 measures are effective at minimizing exposure to such pollution in specific areas
 (e.g. how much air circulation to cut off, when to best close windows, effects
-of other factors like air washers and indoor humidity, etc).
+of other factors like air filters, air washers, indoor humidity, etc),
+using rp2040+sen5x as a fancy meter device, without needing any other setup
+(servers, dbs, cloud infra, internet or anything else external - it's all
+on-device local).
 
 .. contents::
   :backlinks: none

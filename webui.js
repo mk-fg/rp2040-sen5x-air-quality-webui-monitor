@@ -100,22 +100,22 @@ let vis = d3.select('body svg')
 			ax().tickSize(height, 0).tickFormat('') )
 		s.append('g').attr('class', 'y grid').call(
 			ay_pmx().tickSize(-width, 0).tickFormat('') ) })
-	.call( s => s
+	.call(s => s
 		.append('g')
-			.attr('class', 'x axis').attr('transform', `translate(0 ${height})`)
+			.attr('class', 'x axis fg').attr('transform', `translate(0 ${height})`)
 			.call(ax())
 		.append('text')
 			.attr('transform', `translate(${width} 0)`)
 			.attr('dx', '-1em').attr('dy', '3em')
 			.style('text-anchor', 'end').text(
 				`Date/time in local/browser timezone (${fmt_ts_tz}, ${ts_now_label})` ) )
-	.call( s => s
-		.append('g').attr('class', 'y axis').call(ay_pmx())
+	.call(s => s
+		.append('g').attr('class', 'y axis fg').datum(ds_pmx).call(ay_pmx())
 		.append('text')
 			.attr('transform', 'rotate(-90)').attr('dx', '-1em').attr('dy', '-3em')
 			.style('text-anchor', 'end').text('PMx µg/m³') )
-	.call( s => ds_aux.forEach((k, n) =>
-		s.append('g').attr('class', 'y axis')
+	.call(s => ds_aux.forEach((k, n) =>
+		s.append('g').attr('class', 'y axis fg').datum(k)
 			.attr('transform', `translate(${width + n*30} 0)`)
 			.call(d3.axisRight(ys[k]))
 			.call(s => s.selectAll('text')
@@ -133,6 +133,7 @@ let vis = d3.select('body svg')
 Focus: {
 	let side = -1, // 1 or -1
 		x_bisect = d3.bisector(d => d.ts).left,
+		y_axes = vis.selectAll('.y.axis'),
 		focus = vis
 			.append('g').attr('class', 'focus').style('display', 'none')
 			.call( s => s.append('line')
@@ -153,9 +154,12 @@ Focus: {
 		fmt_line = (d, k) => { let label = ds_map[k]?.label
 			return `${label ? (label+': ') : ''}${(ds_map[k]?.fmt || fmt_n)(d[k])}` }
 
-	let focus_hl_line = (hl_set=(k,a,b)=>b) => dss.forEach( ds =>
-		ds.line?.attr('stroke', hl_set(ds.k, 'currentColor', ds.color))
-			.attr('stroke-width', hl_set(ds.k, 2, ds.line_w || null)) )
+	let focus_hl_line = hl_set => {
+		let hs_ds = hl_set || ((k, a, b) => b), hs_ax = hl_set || (() => true)
+		dss.forEach(ds => ds
+			.line?.attr('stroke', hs_ds(ds.k, 'currentColor', ds.color))
+			.attr('stroke-width', hs_ds(ds.k, 2, ds.line_w || null)))
+		y_axes.classed('fg', d => d.some ? d.some(k => hs_ax(k)) : hs_ax(d)) }
 
 	vis.append('rect')
 		.attr('class', 'overlay').attr('width', width).attr('height', height)
