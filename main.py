@@ -33,6 +33,7 @@ class AQMConf:
 	webui_verbose = False
 	webui_port = 80
 	webui_conn_backlog = 5
+	webui_title = 'RP2040 SEN5x Air Quality Monitor'
 	webui_url_prefix = ''
 	webui_d3_api = 7
 	webui_d3_load_from_internet = False
@@ -482,6 +483,7 @@ class WebUI:
 			return True
 
 	def __init__( self, srb, verbose=False,
+			page_title=AQMConf.webui_title,
 			url_prefix=AQMConf.webui_url_prefix,
 			d3_api=AQMConf.webui_d3_api,
 			d3_remote=AQMConf.webui_d3_load_from_internet,
@@ -490,7 +492,7 @@ class WebUI:
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 		self.buff = bytearray(2048); self.buff_mv = memoryview(self.buff)
-		self.act_fan_clean_iter = fan_clean_func_iter
+		self.page_title, self.act_fan_clean_iter = page_title, fan_clean_func_iter
 		self.req_url_map = dict(
 			page_index=(b'/', b'/index.html', b'/index.htm'), favicon=(b'/favicon.ico',),
 			js=(b'/webui.js',), js_d3=(f'/d3.v{self.d3_api}.min.js'.encode(),),
@@ -584,7 +586,7 @@ class WebUI:
 				for err in err_msgs )
 			err_msgs = f'<ul id=errors>\n{err_msgs}\n</ul>'
 		body = webui_body.strip().replace(b'\t', b'  ').format(
-			title='RP2040 SEN5x Air Quality Monitor',
+			title=self.page_title,
 			sen_actions=sen_actions or '', err_msgs=err_msgs or '',
 			d3_api=self.d3_api, d3_from_cdn=int(self.d3_remote),
 			**dict((f'url_{k}', url) for k, url in req.url_links.items()) )
@@ -688,7 +690,7 @@ async def main():
 		verbose=conf.sensor_verbose ))
 
 	if socket:
-		webui = WebUI( srb,
+		webui = WebUI( srb, page_title=conf.webui_title,
 			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
 			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet,
 			fan_clean_func_iter=sen5x.fan_clean_func_iter(
