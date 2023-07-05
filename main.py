@@ -483,7 +483,8 @@ class WebUI:
 			d3_api=AQMConf.webui_d3_api,
 			d3_remote=AQMConf.webui_d3_load_from_internet,
 			fan_clean_func_iter=val_iter() ):
-		self.srb, self.req_n, self.verbose = srb, 0, verbose
+		self.srb, self.verbose = srb, verbose
+		self.req_n, self.req_lock = 0, asyncio.Lock()
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 		self.buff = bytearray(2048); self.buff_mv = memoryview(self.buff)
@@ -518,11 +519,12 @@ class WebUI:
 			k, _, v = line.partition(b':')
 			if v: req.headers[k.strip().lower()] = v.strip().lower()
 		req.sin.close()
+		await self.req_lock.acquire() # avoids transfer-buffer clashes
 		try: await self.req_handler(req)
 		except OSError as err:
 			if err.errno != 104: raise # ignore ECONNRESET
 		finally:
-			req.sout.close() # in case req_handler failed
+			self.req_lock.release(); req.sout.close() # in case req_handler failed
 			await asyncio.gather(req.sin.wait_closed(), req.sout.wait_closed())
 
 	async def res_err(self, req, code, msg=''):
@@ -598,10 +600,11 @@ class WebUI:
 		req.sout.write(
 			b'Content-Type: application/octet-stream\r\n'
 			b'X-Format: [ 8B double time-offset ms || 16B SEN5x sample ]*\r\n' )
-		bs = self.srb.data_samples_count() * (8 + 16)
+		buff, bs = self.buff_mv[:24], self.srb.data_samples_count() * 24
 		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
 		for n, (td, sample) in enumerate(self.srb.data_samples_raw()):
-			req.sout.write(struct.pack('>d16s', float(td), sample))
+			struct.pack_into('>d16s', buff, 0, float(td), sample)
+			req.sout.write(buff)
 			if not n % 80: await req.sout.drain()
 
 	async def req_data_raw(self, req):
@@ -620,8 +623,9 @@ class WebUI:
 		if not req.res_ok(): return
 		req.sout.write(b'Content-Type: text/csv\r\n')
 		header = b'time_offset, pm10, pm25, pm40, pm100, rh, t, voc, nox\n'
-		line = bytearray( b' 123456.0, 123.0, 123.0,'
+		line_base = ( b' 123456.0, 123.0, 123.0,'
 			b' 123.0, 123.0, 12.34, 12.345, 1234.0, 1234.0\n' )
+		(line := self.buff_mv[:len(line_base)])[:] = line_base
 		bs = len(header) + self.srb.data_samples_count() * len(line)
 		req.sout.write(f'Content-Length: {bs}\r\n\r\n'.encode())
 		req.sout.write(header)
