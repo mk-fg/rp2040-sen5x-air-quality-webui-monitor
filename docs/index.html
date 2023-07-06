@@ -14,8 +14,9 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .focus line { fill: none; stroke: #81b0da; }
 .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
 .focus tspan.hl { stroke: #025fb3; }
-#exports { float: left; } #actions { float: right; } #graph { clear: both; }
-#errors { clear: both; width: 40rem; list-style: none; padding: 0; }
+#exports { float: left; } #actions { float: right; }
+#errors, #graph, #marks { clear: both; }
+#errors { width: 40rem; list-style: none; padding: 0; }
 #errors li { background: #9b2220; font-weight: bold;
 	margin: .5rem; padding: .5rem 1rem; border-radius: .4rem; }
 #errors li::before { content: '⚠️'; margin-right: .4rem; }
@@ -29,16 +30,17 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 	<li><a href='samples.8Bms_16Bsen5x_tuples.bin'>Data export in binary format</a>
 </ul>
 
-<!-- <ul id=actions> -->
-<!-- 	<li><a href='fan-clean'>Run fan cleaning</a> (at least every week) -->
-<!-- </ul> -->
+<ul id=actions>
+	<!-- <li><a href='fan-clean'>Run fan cleaning</a> (at least every week) -->
+</ul>
 
-<!-- <ul id=errors> -->
-<!-- 	<li>Some test error message from sensor -->
-<!-- 	<li>Some other error -->
-<!-- </ul> -->
+<ul id=errors>
+	<!-- <li>Some test error message from sensor -->
+	<!-- <li>Some other error -->
+</ul>
 
 <div id=graph><svg></svg></div>
+<div id=marks><ul></ul></div>
 
 <script>
 window.aqm_opts = {

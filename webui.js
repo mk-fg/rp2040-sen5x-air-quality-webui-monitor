@@ -29,6 +29,11 @@ if (!d3) return document.getElementById('graph').innerHTML = `
 		<a href='${d3js_remote_url}'>${d3js_local_url}</a> into same dir as main script.</p>`
 
 
+let fetch_data = url => fetch(url).then(async res => {
+		if (!res.ok) throw `HTTP Error [ ${url} ]: ${res.status} ${res.statusText}`
+		return new DataView(await res.arrayBuffer()) })
+	.catch(res => d3.select('#errors').append('li').text(res) && null)
+
 let fmt_ts_tz, data, dss, ds_map, ds_text,
 	ds_pmx = ['pm10', 'pm25', 'pm40', 'pm100'], ds_aux = ['voc', 'nox', 't', 'rh']
 Data: {
@@ -38,7 +43,7 @@ Data: {
 			sample_keys = ['ts', 'pm10', 'pm25', 'pm40', 'pm100', 'rh', 't', 'voc', 'nox'],
 			sample_ks = [1, 10, 10, 10, 10, 100, 200, 10, 10],
 			sample_nx = [-1, 0xffff, 0xffff, 0xffff, 0xffff, 0x7fff, 0x7fff, 0x7fff, 0x7fff],
-			data_raw = new DataView(await fetch(urls.data).then(res => res.arrayBuffer()))
+			data_raw = await fetch_data(urls.data)
 		return d3.range(0, data_raw.byteLength, sbs).map(n => {
 			let vals = [data_raw.getFloat64(n)]
 			vals.push.apply(vals, d3.range(n=n+8, n=n+2*4, 2).map(n => data_raw.getUint16(n)))
@@ -91,7 +96,7 @@ let margin = {top: 20, right: 130, bottom: 50, left: 70},
 		timeZone: fmt_ts_tz, hour: '2-digit', minute: '2-digit',
 		second: '2-digit', hour12: false }).format() + ' now'
 
-let vis = d3.select('body svg')
+let vis = d3.select('#graph svg')
 		.attr('width', width + margin.left + margin.right)
 		.attr('height', height + margin.top + margin.bottom)
 	.append('g').attr('transform', `translate(${margin.left} ${margin.top})`)

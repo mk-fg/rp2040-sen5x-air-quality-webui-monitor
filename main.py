@@ -81,8 +81,8 @@ webui_body = b'''
 	<li><a href={url_data_csv!r}>Data export in CSV</a>
 	<li><a id=data-url href={url_data_bin!r}>Data export in binary format</a>
 </ul>
-{sen_actions}
-{err_msgs}
+<ul id=actions>{sen_actions}</ul>
+<ul id=errors>{err_msgs}</ul>
 <div id=graph><svg></svg></div>
 <script>
 window.aqm_opts = {{
@@ -574,14 +574,13 @@ class WebUI:
 		if not req.res_ok(): return
 		req.sout.write(b'Content-Type: text/html\r\n')
 		if sen_actions := next(self.act_fan_clean_iter):
-			sen_actions = ( '<ul id=actions>\n<li>'
-					'<a href=\'{url}\'>Run fan cleaning</a> (at least every week)\n</ul>'
+			sen_actions = (
+				'\n<li><a href=\'{url}\'>Run fan cleaning</a> (at least every week)\n'
 				.format(url=req.url_links['act_fan_clean']) )
 		if err_msgs := self.srb.data_errors():
 			err_msgs = '\n'.join(
 				f'<li>{webui_err_msgs.get(err) or "Unknown error [{}]".format(err)}'
 				for err in err_msgs )
-			err_msgs = f'<ul id=errors>\n{err_msgs}\n</ul>'
 		body = webui_body.strip().replace(b'\t', b'  ').format(
 			title=self.page_title,
 			sen_actions=sen_actions or '', err_msgs=err_msgs or '',
