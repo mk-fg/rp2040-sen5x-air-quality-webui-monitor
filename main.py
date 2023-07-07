@@ -35,6 +35,7 @@ class AQMConf:
 	webui_conn_backlog = 5
 	webui_title = 'RP2040 SEN5x Air Quality Monitor'
 	webui_url_prefix = ''
+	webui_marks_storage_bytes = 512
 	webui_d3_api = 7
 	webui_d3_load_from_internet = False
 
@@ -57,8 +58,9 @@ def val_iter(val=None): # placeholder for iterators
 # webui_head is not templated, so can be full of {}
 webui_head = b'''<!DOCTYPE html>
 <head><meta charset=utf-8><style>
+:root { --c-fg: #d2f3ff; --c-bg: #09373b; }
 body { margin: 0 auto; padding: 1em;
-	max-width: 960px; color: #d2f3ff; background: #09373b; }
+	max-width: 960px; color: var(--c-fg); background: var(--c-bg); }
 a { color: #5dcef5; } a:visited { color: #b092db; }
 svg g { color: #d2f3ff; }
 svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
@@ -68,11 +70,29 @@ svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 .focus line { fill: none; stroke: #81b0da; }
 .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
 .focus tspan.hl { stroke: #025fb3; }
-#exports { float: left; } #actions { float: right; } #graph { clear: both; }
-#errors { clear: both; width: 40rem; list-style: none; padding: 0; }
+.marks line { stroke-width: 2; }
+#exports { float: left; } #actions { float: right; }
+#errors, #graph, #marks { clear: both; }
+#errors { width: 40rem; list-style: none; padding: 0; }
 #errors li { background: #9b2220; font-weight: bold;
 	margin: .5rem; padding: .5rem 1rem; border-radius: .4rem; }
 #errors li::before { content: '⚠️'; margin-right: .4rem; }
+#marks {
+	display: flex; align-items: stretch; position: relative;
+	min-height: 10rem; width: 90%; margin: 1rem auto; }
+#marks.hide { display: none; }
+#marks button {
+	position: absolute; top: .4rem; right: 1rem;
+	border: var(--c-fg) outset 1px; border-radius: .5rem;
+	padding: .4rem 1rem; cursor: pointer; color: var(--c-fg); background: #5dcef520; }
+#marks button:disabled { color: #5dcef580; cursor: not-allowed; }
+#marks div, #marks textarea {
+	flex-grow: 0; margin: 0; padding: .6rem 0;
+	border: var(--c-bg) inset 1px; line-height: 1.5rem;
+	font: 1rem 'Liberation Mono', 'Luxi Mono', monospace; }
+#marks div { position: relative; min-width: 2rem; white-space: nowrap; text-align: center; }
+#marks textarea { flex-grow: 1; color: currentColor;
+	padding: .6rem; border-color: var(--c-fg); background: var(--c-bg); }
 </style>'''
 
 webui_body = b'''
@@ -84,12 +104,19 @@ webui_body = b'''
 <ul id=actions>{sen_actions}</ul>
 <ul id=errors>{err_msgs}</ul>
 <div id=graph><svg></svg></div>
+<div id=marks class=hide>
+	<div></div>
+	<textarea></textarea>
+	<button>Save</button>
+</div>
 <script>
 window.aqm_opts = {{
 	d3_api: {d3_api},
-	d3_from_cdn: {d3_from_cdn} }}
+	d3_from_cdn: {d3_from_cdn},
+	marks_bs_max: {marks_bs_max} }}
 window.aqm_urls = {{
 	data: {url_data_bin!r},
+	marks: {url_data_marks!r},
 	d3: {url_js_d3!r} }}
 </script>
 <script type=text/javascript src={url_js!r}></script>'''
@@ -451,43 +478,25 @@ class SampleRingBuffer:
 class WebUI:
 
 	class Req:
-		prefix, cache_gen = '', 0
+		prefix, cache_gen, etag, bs = '', 0, b'-no-header-', 0
 		mime_types = dict(js='text/javascript', ico='image/vnd.microsoft.icon')
-		def __init__(self, **kws):
-			self.headers = dict()
-			self.update(**kws)
+		def __init__(self, **kws): self.update(**kws)
 		def update(self, **kws):
 			for k,v in kws.items(): setattr(self, k, v)
-		def res_ok(req, cache=None):
-			if cache:
-				etag_header = req.headers.get(b'if-none-match', b'-no-header-')
-				etag = 0xcbf29ce484222325 # 64b FNV-1a hash
-				for b in f'{req.cache_gen}.{cache}'.encode():
-					etag = ((etag ^ b) * 0x100000001b3) % 0x10000000000000000
-				etag = f'"{etag.to_bytes(8, "big").hex()}"'.encode()
-				if etag == etag_header:
-					req.log and req.log(f'ETag-cache-match-304: {etag.decode()}')
-					req.sout.write(b'HTTP/1.0 304 Not Modified\r\nServer: aqm\r\n\r\n')
-					return
-			req.sout.write(b'HTTP/1.0 200 OK\r\nServer: aqm\r\n')
-			if not cache: req.sout.write(b'Cache-Control: no-cache\r\n')
-			else:
-				req.log and req.log( 'ETag-cache-miss:'
-					f' {etag.decode()} (data) vs {etag_header.decode()} (request)' )
-				req.sout.write(b'ETag: ' + etag + b'\r\n')
-			return True
 
 	def __init__( self, srb, verbose=False,
 			page_title=AQMConf.webui_title,
 			url_prefix=AQMConf.webui_url_prefix,
 			d3_api=AQMConf.webui_d3_api,
 			d3_remote=AQMConf.webui_d3_load_from_internet,
+			marks_bs_max=AQMConf.webui_marks_storage_bytes,
 			fan_clean_func_iter=val_iter() ):
 		self.srb, self.verbose = srb, verbose
 		self.req_n, self.req_lock = 0, asyncio.Lock()
 		self.d3_api, self.d3_remote = d3_api, d3_remote
 		self.url_prefix, self.url_strip = url_prefix, url_prefix.encode()
 		self.buff = bytearray(2048); self.buff_mv = memoryview(self.buff)
+		self.marks, self.marks_bs_max = None, marks_bs_max
 		self.page_title, self.act_fan_clean_iter = page_title, fan_clean_func_iter
 		self.req_url_map = dict(
 			page_index=(b'/', b'/index.html', b'/index.htm'), favicon=(b'/favicon.ico',),
@@ -495,7 +504,7 @@ class WebUI:
 			data_csv=(b'/data/all/latest-first/samples.csv',),
 			data_bin=(b'/data/all/latest-first/samples.8Bms_16Bsen5x_tuples.bin',),
 			data_raw=(b'/data/all/latest-first/samples.debug.raw',),
-			act_fan_clean=(b'/fan-clean',) )
+			data_marks=(b'/data/marks.bin',), act_fan_clean=(b'/fan-clean',) )
 		self.req_url_links = dict(( k, self.url_prefix +
 			url[0].decode().lstrip('/') ) for k, url in self.req_url_map.items())
 
@@ -515,36 +524,53 @@ class WebUI:
 		req.log and req.log(f'Request: {req.verb.decode()} {req.url.decode()}')
 		if self.url_strip and req.url.startswith(self.url_strip):
 			req.url = req.url[len(self.url_strip):]
-		while line := (await req.sin.readline()).strip():
-			k, _, v = line.partition(b':')
-			if v: req.headers[k.strip().lower()] = v.strip().lower()
-		req.sin.close()
 		await self.req_lock.acquire() # avoids transfer-buffer clashes
 		try: await self.req_handler(req)
-		except OSError as err:
-			if err.errno != 104: raise # ignore ECONNRESET
+		except Exception as err:
+			if isinstance(err, OSError) and err.errno == 104: pass # ECONNRESET
+			else: req.log and req.log(f'Request-exc: {err_fmt(err)}')
 		finally:
-			self.req_lock.release(); req.sout.close() # in case req_handler failed
+			self.req_lock.release(); req.sin.close(); req.sout.close()
 			await asyncio.gather(req.sin.wait_closed(), req.sout.wait_closed())
 
-	async def res_err(self, req, code, msg=''):
+	def res_err(self, req, code, msg=''):
 		req.log and req.log(f'Response: http-error-{code} [{msg or "-"}]')
 		req.sout.write(f'HTTP/1.0 {code} {msg}\r\n'.encode())
 		body = ( f'HTTP Error [{code}]: {msg}\n'
 			if msg else f'HTTP Error [{code}]\n' ).encode()
 		req.sout.write(b'Server: aqm\r\nContent-Type: text/plain\r\n')
 		req.sout.write(f'Content-Length: {len(body)}\r\n\r\n'.encode())
-		req.sout.write(body); await req.sout.drain(); req.sout.close()
+		req.sout.write(body)
+
+	def res_ok(self, req, cache=None):
+		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
+		if cache:
+			etag = 0xcbf29ce484222325 # 64b FNV-1a hash
+			for b in f'{req.cache_gen}.{cache}'.encode():
+				etag = ((etag ^ b) * 0x100000001b3) % 0x10000000000000000
+			etag = f'"{etag.to_bytes(8, "big").hex()}"'.encode()
+			if etag == req.etag:
+				req.log and req.log(f'ETag-cache-match-304: {etag.decode()}')
+				req.sout.write(b'HTTP/1.0 304 Not Modified\r\nServer: aqm\r\n\r\n')
+				return
+		req.sout.write(b'HTTP/1.0 200 OK\r\nServer: aqm\r\n')
+		if not cache: req.sout.write(b'Cache-Control: no-cache\r\n')
+		else:
+			req.log and req.log( 'ETag-cache-miss:'
+				f' {etag.decode()} (data) vs {req.etag.decode()} (request)' )
+			req.sout.write(b'ETag: ' + etag + b'\r\n')
+		return True
 
 	async def res_static(self, req, p):
+		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
 		mime = req.mime_types.get(
 			p.rpartition('.')[-1], 'application/octet-stream' )
 		for p in [f'{p}.gz', p]:
 			try: src = open(p, 'rb'); break
 			except OSError: pass
-		else: return await self.res_err(req, 404, 'File not found')
+		else: return self.res_err(req, 404, 'File not found')
 		src_mtime, src_bs = os.stat(p)[-1], src.seek(0, 2) # SEEK_END
-		if not req.res_ok(f'{p}.{src_mtime}.{src_bs}'): return
+		if not self.res_ok(req, f'{p}.{src_mtime}.{src_bs}'): return
 		req.sout.write(
 			b'Content-Type: {mime}\r\nContent-Length: {bs}\r\n{enc}'
 			.format( mime=mime, bs=src_bs,
@@ -558,20 +584,22 @@ class WebUI:
 
 	async def req_handler(self, req):
 		req.ts, req.verb = time.ticks_ms(), req.verb.lower()
-		if req.verb != b'get':
-			return await self.res_err(req, 405, 'Method Not Allowed')
 		while b'//' in req.url: req.url = req.url.replace(b'//', b'/')
+		while line := (await req.sin.readline()).strip():
+			k, _, v = line.partition(b':')
+			if (k := k.strip().lower()) == b'if-none-match': req.etag = v.strip()
+			elif k == b'content-length': req.bs = int(v)
 		for k, k_url in req.url_map.items():
 			if req.url not in k_url: continue
 			req.log and req.log(f'Handler: {k}')
 			await getattr(self, f'req_{k}')(req)
 			break
-		else: return await self.res_err(req, 404, 'Not Found')
+		else: self.res_err(req, 404, 'Not Found')
 		await req.sout.drain(); req.sout.close()
 		req.log and req.log(f'Done [ {time.ticks_diff(time.ticks_ms(), req.ts):,d} ms]')
 
 	async def req_page_index(self, req):
-		if not req.res_ok(): return
+		if not self.res_ok(req): return
 		req.sout.write(b'Content-Type: text/html\r\n')
 		if sen_actions := next(self.act_fan_clean_iter):
 			sen_actions = (
@@ -585,6 +613,7 @@ class WebUI:
 			title=self.page_title,
 			sen_actions=sen_actions or '', err_msgs=err_msgs or '',
 			d3_api=self.d3_api, d3_from_cdn=int(self.d3_remote),
+			marks_bs_max=self.marks_bs_max,
 			**dict((f'url_{k}', url) for k, url in req.url_links.items()) )
 		page_bs = len(webui_head) + len(body)
 		req.sout.write(f'Content-Length: {page_bs}\r\n\r\n'.encode())
@@ -594,8 +623,36 @@ class WebUI:
 	def req_js(self, req): return self.res_static(req, 'webui.js')
 	def req_js_d3(self, req): return self.res_static(req, f'd3.v{self.d3_api}.min.js')
 
+	async def req_data_marks(self, req):
+		if req.verb == b'get':
+			req.sout.write(
+				b'HTTP/1.0 200 OK\r\nServer: aqm\r\n'
+				b'Content-Type: application/octet-stream\r\n'
+				b'Cache-Control: no-cache\r\n'
+				b'X-Format: [ 1B label-length || 1B color'
+					b' || 4B uint32-posix-time || label-utf8 ]* || \\x00\r\n' )
+			if not self.marks:
+				req.log and req.log('Marks: empty buffer')
+				req.sout.write(b'Content-Length: 1\r\n\r\n\0')
+			else:
+				req.log and req.log(f'Marks: sending {self.marks_bs:,d}B')
+				req.sout.write(f'Content-Length: {self.marks_bs}\r\n\r\n'.encode())
+				req.sout.write(self.marks_mv[:self.marks_bs])
+		elif req.verb == b'put':
+			if not self.marks:
+				self.marks, self.marks_bs = bytearray(self.marks_bs_max), 1
+				self.marks_mv = memoryview(self.marks)
+			self.marks_bs = await req.sin.readinto(self.marks_mv[:req.bs])
+			req.log and req.log(f'Marks: received {self.marks_bs:,d} / {req.bs:,d} B')
+			if self.marks_bs != req.bs:
+				self.marks[0], self.marks_bs = 0, 1
+				req.log and req.log('Marks: error - incomplete data read')
+				return self.res_err(req, 400, 'Bad Request')
+			req.sout.write(b'HTTP/1.0 204 No Content\r\nServer: aqm\r\n\r\n')
+		else: self.res_err(req, 405, 'Method Not Allowed')
+
 	async def req_data_bin(self, req):
-		if not req.res_ok(): return
+		if not self.res_ok(req): return
 		req.sout.write(
 			b'Content-Type: application/octet-stream\r\n'
 			b'X-Format: [ 8B double time-offset ms || 16B SEN5x sample ]*\r\n' )
@@ -607,7 +664,7 @@ class WebUI:
 			if not n % 80: await req.sout.drain()
 
 	async def req_data_raw(self, req):
-		if not req.res_ok(): return
+		if not self.res_ok(req): return
 		req.sout.write(
 			b'Content-Type: application/octet-stream\r\n'
 			b'X-Format: Raw SampleRingBuffer contents for debugging\r\n' )
@@ -619,7 +676,7 @@ class WebUI:
 			n += bs
 
 	async def req_data_csv(self, req):
-		if not req.res_ok(): return
+		if not self.res_ok(req): return
 		req.sout.write(b'Content-Type: text/csv\r\n')
 		header = b'time_offset, pm10, pm25, pm40, pm100, rh, t, voc, nox\n'
 		line_base = ( b' 123456.0, 123.0, 123.0,'
@@ -647,8 +704,9 @@ class WebUI:
 			if not n % 20: await req.sout.drain()
 
 	async def req_act_fan_clean(self, req):
+		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
 		if not (fan_clean_func := next(self.act_fan_clean_iter)):
-			return await self.res_err(req, 503, 'Rate limit exceeded')
+			return self.res_err(req, 429, 'Too many requests')
 		await fan_clean_func()
 		req.sout.write(b'HTTP/1.0 302 Found\r\n')
 		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
@@ -691,6 +749,7 @@ async def main():
 		webui = WebUI( srb, page_title=conf.webui_title,
 			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
 			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet,
+			marks_bs_max=conf.webui_marks_storage_bytes,
 			fan_clean_func_iter=sen5x.fan_clean_func_iter(
 				int(conf.sensor_fan_clean_min_interval * 1000) ) )
 		httpd = await asyncio.start_server( webui.request,
