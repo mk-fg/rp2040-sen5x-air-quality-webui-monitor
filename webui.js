@@ -239,7 +239,8 @@ Marks: {
 		await fetch_data(new Request(urls.marks, {method: 'PUT', body: data})) })
 
 	mark_add_ts = (ts, c=0) => {
-		if (mmap[c]) return mark_add_ts(ts, (c+1) % colors.length)
+		if (mmap[c]) return ++c < colors.length ?
+			mark_add_ts(ts, c) : alert('Too many marks already')
 		mmap[c] = {c: c, ts: ts, label: `mark-${c+1}`}
 		mta_commit(); mta_update() },
 
