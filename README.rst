@@ -7,8 +7,10 @@ to monitor air quality parameters (VOC, PM1.0, PM2.5, PM4, PM10 and such),
 using connected I²C Sensirion SEN5x sensor (e.g. SEN54_ or `SEN54 in a box`_)
 and display/export that data via basic http web interface, with some charts there.
 
-Device is expected to have a WiFi chip for http access, which is also setup by
-the script from a `simple ini config`_.
+Device is expected to have a WiFi chip (to access WebUI on it over http),
+which is also setup by the script from a `simple ini config`_, but it can be
+disabled and any other network interface pre-configured instead, e.g. from a
+separate ``boot.py`` file or by adding a couple lines for it to ``main.py``.
 
 Intended use is for temporary home air quality control during forest-fire
 seasons or periods of weather conducive to smog accumulation, and to check which
@@ -18,6 +20,10 @@ of other factors like air filters, air washers, indoor humidity, etc),
 using rp2040+sen5x as a fancy meter device, without needing any other setup
 (servers, dbs, cloud infra, internet or anything else external - it's all
 on-device local).
+
+All data that script collects is only stored in volatile memory, and should be
+exported from device and preserved in a more permanent manner before shutting
+down or relocating it as necessary.
 
 .. contents::
   :backlinks: none
@@ -245,6 +251,9 @@ Data export formats
 
 CSV and binary data exports are available via links at the top of WebUI index page.
 
+Sensor data is only stored in volatile memory, so using these is necessary if it
+will be needed in any way later.
+
 **CSV** (`comma-separated values`_ plaintext format, .csv file) should be mostly
 self-descriptive, with the header containing following columns (and data rows
 following that)::
@@ -300,6 +309,12 @@ underpowered microcontroller, using multiple orders of magnitude less CPU cycles
 
 Samples should be returned in most-recent-first order, but with timestamps in there,
 it's more like an implementation detail and shouldn't matter or be relied upon.
+
+Exported binary file can be put into `docs <docs>`_ dir (instead of
+``samples.8Bms_16Bsen5x_tuples.bin`` example file there) to see the data
+via same WebUI anytime later - run ``python3 docs/run-webui-http-server.py``
+and access it on http://localhost:8000 , or ``python -m http.server``,
+or anything else that can serve static files over http.
 
 .. _comma-separated values: https://en.wikipedia.org/wiki/Comma-separated_values
 .. _MS Excel: https://en.wikipedia.org/wiki/Microsoft_Excel
