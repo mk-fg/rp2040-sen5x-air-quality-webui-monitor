@@ -533,7 +533,10 @@ class WebUI:
 			self.req_lock.release(); req.sin.close(); req.sout.close()
 			await asyncio.gather(req.sin.wait_closed(), req.sout.wait_closed())
 
-	def res_err(self, req, code, msg=''):
+	def res_err(self, req, code, msg={
+			400: 'Bad Request', 405: 'Method Not Allowed',
+			413: 'Payload Too Large', 404: 'Not Found', 429: 'Too many requests' }):
+		if isinstance(msg, dict): msg = msg.get(code, '')
 		req.log and req.log(f'Response: http-error-{code} [{msg or "-"}]')
 		req.sout.write(f'HTTP/1.0 {code} {msg}\r\n'.encode())
 		body = ( f'HTTP Error [{code}]: {msg}\n'
@@ -543,7 +546,7 @@ class WebUI:
 		req.sout.write(body)
 
 	def res_ok(self, req, cache=None):
-		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
+		if req.verb != b'get': return self.res_err(req, 405)
 		if cache:
 			etag = 0xcbf29ce484222325 # 64b FNV-1a hash
 			for b in f'{req.cache_gen}.{cache}'.encode():
@@ -562,13 +565,13 @@ class WebUI:
 		return True
 
 	async def res_static(self, req, p):
-		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
+		if req.verb != b'get': return self.res_err(req, 405)
 		mime = req.mime_types.get(
 			p.rpartition('.')[-1], 'application/octet-stream' )
 		for p in [f'{p}.gz', p]:
 			try: src = open(p, 'rb'); break
 			except OSError: pass
-		else: return self.res_err(req, 404, 'File not found')
+		else: return self.res_err(req, 404)
 		src_mtime, src_bs = os.stat(p)[-1], src.seek(0, 2) # SEEK_END
 		if not self.res_ok(req, f'{p}.{src_mtime}.{src_bs}'): return
 		req.sout.write(
@@ -594,7 +597,7 @@ class WebUI:
 			req.log and req.log(f'Handler: {k}')
 			await getattr(self, f'req_{k}')(req)
 			break
-		else: self.res_err(req, 404, 'Not Found')
+		else: self.res_err(req, 404)
 		await req.sout.drain(); req.sout.close()
 		req.log and req.log(f'Done [ {time.ticks_diff(time.ticks_ms(), req.ts):,d} ms]')
 
@@ -629,8 +632,8 @@ class WebUI:
 				b'HTTP/1.0 200 OK\r\nServer: aqm\r\n'
 				b'Content-Type: application/octet-stream\r\n'
 				b'Cache-Control: no-cache\r\n'
-				b'X-Format: [ 1B label-length || 1B color'
-					b' || 4B uint32-posix-time || label-utf8 ]* || \\x00\r\n' )
+				b'X-Format: [ uint8 label-length || uint8 color'
+					b' || uint32 posix-time || label-utf8 ]* || \\x00\r\n' )
 			if not self.marks:
 				req.log and req.log('Marks: empty buffer')
 				req.sout.write(b'Content-Length: 1\r\n\r\n\0')
@@ -642,14 +645,15 @@ class WebUI:
 			if not self.marks:
 				self.marks, self.marks_bs = bytearray(self.marks_bs_max), 1
 				self.marks_mv = memoryview(self.marks)
+			if req.bs > len(self.marks_mv): return self.res_err(req, 413)
 			self.marks_bs = await req.sin.readinto(self.marks_mv[:req.bs])
 			req.log and req.log(f'Marks: received {self.marks_bs:,d} / {req.bs:,d} B')
 			if self.marks_bs != req.bs:
 				self.marks[0], self.marks_bs = 0, 1
 				req.log and req.log('Marks: error - incomplete data read')
-				return self.res_err(req, 400, 'Bad Request')
+				return self.res_err(req, 400)
 			req.sout.write(b'HTTP/1.0 204 No Content\r\nServer: aqm\r\n\r\n')
-		else: self.res_err(req, 405, 'Method Not Allowed')
+		else: self.res_err(req, 405)
 
 	async def req_data_bin(self, req):
 		if not self.res_ok(req): return
@@ -704,9 +708,8 @@ class WebUI:
 			if not n % 20: await req.sout.drain()
 
 	async def req_act_fan_clean(self, req):
-		if req.verb != b'get': return self.res_err(req, 405, 'Method Not Allowed')
-		if not (fan_clean_func := next(self.act_fan_clean_iter)):
-			return self.res_err(req, 429, 'Too many requests')
+		if req.verb != b'get': return self.res_err(req, 405)
+		if not (fan_clean_func := next(self.act_fan_clean_iter)): return self.res_err(req, 429)
 		await fan_clean_func()
 		req.sout.write(b'HTTP/1.0 302 Found\r\n')
 		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
