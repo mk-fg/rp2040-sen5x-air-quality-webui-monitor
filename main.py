@@ -64,13 +64,13 @@ body { margin: 0 auto; padding: 1em;
 a { color: #5dcef5; } a:visited { color: #b092db; }
 svg g { color: #d2f3ff; }
 svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
-.axis { opacity: 0.5; } .axis.fg { opacity: 1; } .axis text { fill: currentColor; }
-.grid line { stroke: #275259; } .grid .domain { stroke: none; }
-.line { fill: none; } .overlay { fill: none; pointer-events: all; }
-.focus line { fill: none; stroke: #81b0da; }
-.focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
-.focus tspan.hl { stroke: #025fb3; }
-.marks line { stroke-width: 2; }
+svg .axis { opacity: 0.5; } .axis.fg { opacity: 1; } .axis text { fill: currentColor; }
+svg .grid line { stroke: #275259; } .grid .domain { stroke: none; }
+svg .line { fill: none; } .overlay { fill: none; pointer-events: all; }
+svg .focus line { fill: none; stroke: #81b0da; }
+svg .focus tspan { paint-order: stroke; stroke: #0008; stroke-width: .7rem; }
+svg .focus tspan.hl { stroke: #025fb3; }
+svg .marks line { stroke-width: 2; }
 #exports { float: left; } #actions { float: right; }
 #errors, #graph, #marks { clear: both; }
 #errors { width: 40rem; list-style: none; padding: 0; }
