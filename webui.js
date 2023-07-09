@@ -216,17 +216,24 @@ Marks: {
 		mta_colors = d3.select('#marks div'),
 		mta_colors_update = () => mta_colors.selectAll('span')
 			.data(Object.keys(mmap), d => d)
-			.join( en => en.append('span')
-					.attr('style', d => `color: #${colors[d]};`).text(d => `#${d}`).append('br'),
+			.join( en => en.append('span').text(d => `#${d}`)
+					.attr('style', d => `color: #${colors[d]};`).call(s => s.append('br')),
 				up => up, ex => ex.remove() ),
 
 		mvis = vis.append('g').attr('class', 'marks'),
-		mvis_update = () => mvis.selectAll('line')
-			.data(Object.values(mmap), m => m.c)
-			.join( en => en.append('line')
-					.attr('y1', 0).attr('y2', sz.h).attr('stroke', d => `#${colors[d.c]}`),
-				up => up, ex => ex.remove() )
-			.attr('x1', m => x(m.ts)).attr('x2', m => x(m.ts))
+		mvis_update = () => {
+			mvis.selectAll('line')
+				.data(Object.values(mmap), m => m.c)
+				.join( en => en.append('line')
+						.attr('y1', 0).attr('y2', sz.h).attr('stroke', d => `#${colors[d.c]}`),
+					up => up, ex => ex.remove() )
+				.attr('x1', m => x(m.ts)).attr('x2', m => x(m.ts))
+			mvis.selectAll('text')
+				.data(Object.values(mmap), m => m.c)
+				.join( en => en.append('text').attr('dy', '-.3em')
+					.attr('fill', d => `#${colors[d.c]}`).text(m => `#${m.c}`),
+					up => up, ex => ex.remove() )
+				.attr('x', m => x(m.ts)) }
 
 	mta.on('input', debounce(300, 'last', (ev, d) => {
 		let mtx = ev.target.value, mm = mmap_tx_parse(mtx),

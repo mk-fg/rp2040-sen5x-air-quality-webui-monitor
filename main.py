@@ -711,7 +711,7 @@ class WebUI:
 		if req.verb != b'get': return self.res_err(req, 405)
 		if not (fan_clean_func := next(self.act_fan_clean_iter)): return self.res_err(req, 429)
 		await fan_clean_func()
-		req.sout.write(b'HTTP/1.0 302 Found\r\n')
+		req.sout.write(b'HTTP/1.0 302 Found\r\nServer: aqm\r\n')
 		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
 
 
