@@ -37,11 +37,6 @@ let fetch_data = url => fetch(url).then(async res => {
 		return new DataView(await res.arrayBuffer()) })
 	.catch(res => d3.select('#errors').append('li').text(res) && null)
 
-let fmt_ts_tz = Intl.DateTimeFormat().resolvedOptions().timeZone,
-	fmt_ts_iso8601 = ts => new Intl.DateTimeFormat('sv-SE', {
-		timeZone: fmt_ts_tz, year: 'numeric', month: '2-digit', day: '2-digit',
-		hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(new Date(ts))
-
 let debounce_enabled = true // for debugging
 let debounce = (delay_ms, mode, func) => {
 	// Usage: s.on('input', debounce(300, 'last', (d, n, ns) => console.log(ns[n].value)))
@@ -59,12 +54,27 @@ let debounce = (delay_ms, mode, func) => {
 		if (!timeout) timeout = window.setTimeout(() => {
 			timeout = null; if (!(mode === 'now' && !timeout_calls)) func(...args) }, delay_ms) } }
 
+let ts_now, ts_now_label = '',
+	fmt_ts_tz = Intl.DateTimeFormat().resolvedOptions().timeZone,
+	fmt_ts_iso8601 = (ts, time, fmt) => {
+		fmt = fmt || { timeZone: fmt_ts_tz,
+			hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }
+		if (!time) Object.assign( fmt,
+			{year: 'numeric', month: '2-digit', day: '2-digit'} )
+		return new Intl.DateTimeFormat('sv-SE', fmt).format(new Date(ts)) }
+
+// Page is static, so timestamps do not change and are pre-set here
+if (opts.time_now) ts_now = opts.time_now * 1000
+else {
+	ts_now = Date.now()
+	ts_now_label = `, ${fmt_ts_iso8601(ts_now, true)} now` }
+
 
 let data, dss, ds_map, ds_text,
 	ds_pmx = ['pm10', 'pm25', 'pm40', 'pm100'], ds_aux = ['voc', 'nox', 't', 'rh']
 Data: {
 	let fetch_samples = async ts => {
-		if (!ts) ts = Date.now()
+		if (!ts) ts = ts_now
 		let sbs = 24,
 			sample_keys = ['ts', 'pm10', 'pm25', 'pm40', 'pm100', 'rh', 't', 'voc', 'nox'],
 			sample_ks = [1, 10, 10, 10, 10, 100, 200, 10, 10],
@@ -113,10 +123,7 @@ let margin = {top: 20, right: 130, bottom: 50, left: 70},
 		dss.map(ds => [ ds.k, ds_pmx.includes(ds.k) ? y_pmx :
 			d3.scaleLinear().range([sz.h, 0]).domain(d3.extent(data.map(d => d[ds.k]))) ]) ),
 	ax = () => d3.axisBottom(x).ticks(8),
-	ay_pmx = () => d3.axisLeft(y_pmx), // main Y axis
-	ts_now_label = new Intl.DateTimeFormat('sv-SE', {
-		timeZone: fmt_ts_tz, hour: '2-digit', minute: '2-digit',
-		second: '2-digit', hour12: false }).format() + ' now'
+	ay_pmx = () => d3.axisLeft(y_pmx) // main Y axis
 
 let vis = d3.select('#graph svg')
 		.attr('width', sz.w + margin.left + margin.right)
@@ -135,7 +142,7 @@ let vis = d3.select('#graph svg')
 			.attr('transform', `translate(${sz.w} 0)`)
 			.attr('dx', '-1em').attr('dy', '3em')
 			.style('text-anchor', 'end').text(
-				`Date/time in local/browser timezone (${fmt_ts_tz}, ${ts_now_label})` ) )
+				`Date/time in local/browser timezone (${fmt_ts_tz}${ts_now_label})` ) )
 	.call(s => s
 		.append('g').attr('class', 'y axis fg').datum(ds_pmx).call(ay_pmx())
 		.append('text')
@@ -159,6 +166,8 @@ let vis = d3.select('#graph svg')
 
 let mark_add_ts = ts => null
 Marks: {
+	if (opts.marks_disable) break Marks
+
 	let data, bs_max = opts.marks_bs_max,
 		// colors = i-want-hue 100 | ./color-b64sort - -Hs1 -b 09373b:40 -c d2f3ff:40 -c 81b0da
 		//   -c fdc28c -c fc9346 -c eb6311 -c bb3d02  -c 54e011 -c 41a6a2 -c d175c1 -c b31b7c
