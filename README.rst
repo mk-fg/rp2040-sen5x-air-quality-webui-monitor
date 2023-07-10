@@ -12,10 +12,10 @@ which is also setup by the script from a `simple ini config`_, but it can be
 disabled and any other network interface pre-configured instead, e.g. from a
 separate ``boot.py`` file or by adding a couple lines for it to ``main.py``.
 
-Intended use is for temporary home air quality control during forest-fire
+Intended use is for temporary air quality control/monitoring during forest-fire
 seasons or periods of weather conducive to smog accumulation, and to check which
 measures are effective at minimizing exposure to such pollution in specific areas
-(e.g. how much air circulation to cut off, when to best close windows, effects
+(e.g. when to close windows, how much air circulation to cut off, effects
 of other factors like air filters, air washers, indoor humidity, etc),
 using rp2040+sen5x as a fancy meter device, without needing any other setup
 (servers, dbs, cloud infra, internet or anything else external - it's all
@@ -241,6 +241,11 @@ Aside from documentation (like this README), useful files in the repository are:
   (on http://localhost:8000 ), with same WebUI as on devices and some example data,
   to tweak frontend JS easily.
 
+  ``./docs/make-snapshot-html.py`` is to create self-contained single-file HTML
+  from any downloaded ``samples.8Bms_16Bsen5x_tuples.bin`` file, with all JS and
+  data embedded in it, which can be opened in any browser - essentially to
+  `Convert exported samples.bin into an interactive chart file`_.
+
 .. _ini: https://en.wikipedia.org/wiki/INI_file
 .. _D3.js: https://d3js.org/
 .. _d3/d3 source repository: https://github.com/d3/d3
@@ -307,8 +312,9 @@ Such custom binary format should be easy to parse by any code, and is much more
 efficient in pretty much all ways than CSV, especially to generate on a potentially
 underpowered microcontroller, using multiple orders of magnitude less CPU cycles there.
 
-Samples should be returned in most-recent-first order, but with timestamps in there,
-it's more like an implementation detail and shouldn't matter or be relied upon.
+Samples should be returned in most-recent-first order, but with (relative)
+timestamps in there, it's more like an implementation detail and shouldn't
+matter or be relied upon.
 
 Exported binary file can be put into `docs <docs>`_ dir (instead of
 ``samples.8Bms_16Bsen5x_tuples.bin`` example file there) to see the data
@@ -385,6 +391,37 @@ build/upload - see documentation on `MicroPython manifest files`_ for how to do 
   https://docs.micropython.org/en/latest/reference/manifest.html
 
 
+Convert exported samples.bin into an interactive chart file
+-----------------------------------------------------------
+
+Downloaded .bin files have the data, and it can be sometimes useful to take a
+look at what's in such file, or maybe share it, which can be easily done using
+`docs/make-snapshot-html.py script`_.
+
+Running ``./docs/make-snapshot-html.py samples.8Bms_16Bsen5x_tuples.bin``
+will create a self-contained ``snapshot.html`` file in the current dir,
+with all data and scripts needed for visualization embedded in it.
+
+Opening such html in any browser (via double-click, File-Open,
+``python -m http.server``, or dropping it into http-accessible dir somewhere)
+should produce same chart as in device WebUI from where that data was exported.
+
+Run that script with ``-h/--help`` option for more parameters.
+
+Samples .bin file does not have absolute timestamps in it, only offsets from
+"time of the download", so modification time on the file is used as that baseline,
+and might be important to preserve for time axis on the chart to be correct.
+
+make-snapshot-html.py works by loading the bin file, `docs/snapshot.html`_
+as a template for output, and embeds base64-encoded data and all javascript
+sources into it.
+Needs to be run from repository dir to have access to all these components.
+Doesn't work on exported CSV files, only .bin ones.
+
+.. _docs/make-snapshot-html.py script: docs/make-snapshot-html.py
+.. _docs/snapshot.html: docs/snapshot.html
+
+
 Links
 -----
 
@@ -400,8 +437,6 @@ Links
 TODO
 ----
 
-- Check CSP options for loading d3 from CDN, might be broken.
-- More mobile-friendly WebUI visualizations.
-- Look into adding optional http tls wrapping, for diff variety of browser warnings.
-- Robust error wrapping in WebUI, displaying last exception or component failure there.
+- Robust error wrapping in WebUI, displaying last exception or component failures there.
 - Enable WDT, if available on RP2040, displaying reboots via it as an error in WebUI.
+- More mobile-friendly WebUI visualizations.

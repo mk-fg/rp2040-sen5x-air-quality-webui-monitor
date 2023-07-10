@@ -79,7 +79,7 @@ Data: {
 			sample_keys = ['ts', 'pm10', 'pm25', 'pm40', 'pm100', 'rh', 't', 'voc', 'nox'],
 			sample_ks = [1, 10, 10, 10, 10, 100, 200, 10, 10],
 			sample_nx = [-1, 0xffff, 0xffff, 0xffff, 0xffff, 0x7fff, 0x7fff, 0x7fff, 0x7fff],
-			data_raw = await fetch_data(urls.data)
+			data_raw = opts.data || await fetch_data(urls.data)
 		return d3.range(0, data_raw.byteLength, sbs).map(n => {
 			let vals = [data_raw.getFloat64(n)]
 			vals.push.apply(vals, d3.range(n=n+8, n=n+2*4, 2).map(n => data_raw.getUint16(n)))

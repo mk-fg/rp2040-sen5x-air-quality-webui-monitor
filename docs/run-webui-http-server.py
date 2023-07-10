@@ -40,7 +40,7 @@ class ReqHandler(srv.SimpleHTTPRequestHandler):
 		self.flush_headers()
 
 
-os.chdir(pl.Path(__file__).parent)
+os.chdir(pl.Path(__file__).resolve().parent)
 with srv.ThreadingHTTPServer(('0.0.0.0', 8000), ReqHandler) as httpd:
 	host, port = httpd.socket.getsockname()[:2]
 	url_host = f'[{host}]' if ':' in host else host
