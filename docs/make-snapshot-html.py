@@ -29,29 +29,32 @@ def main(argv=None):
 
 	data = p_data_bin.read_bytes()
 	data_ts = p_data_bin.stat().st_mtime
-	html = (p_repo / 'docs/snapshot.html').read_text()
-
-	with gzip.open(p_repo / 'd3.v7.min.js.gz') as d3_src:
-		script_d3 = f'<script>\n{d3_src.read().decode().strip()}\n</script>'
-	script_webui = f'<script>\n{(p_repo / "webui.js").read_text().strip()}\n</script>'
-	script_data = dd(f'''
-		<script>
-		window.aqm_opts.time_now = {int(data_ts)}
-		window.aqm_opts.d3_try_local = 0
-		window.aqm_opts.d3_from_cdn = 0
-		let b64 = '{base64.b64encode(data).decode()}'
-		window.aqm_opts.data = new DataView(
-			Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer )
-		</script>''')
+	html = (p_repo / 'docs/index.html').read_text()
 
 	html = html.replace('<head>', dd('''
 		<head>
 		<meta http-equiv=content-security-policy content="
 			default-src 'none'; font-src 'self'; img-src 'self';
 			style-src 'unsafe-inline'; media-src 'self'; script-src 'unsafe-inline';">''' ))
-	html = html.replace(
-		"<script src='webui.js'></script>",
-		f'\n\n{script_d3}\n\n{script_data}\n\n{script_webui}' )
+
+	# All body stuff other than graph shouldn't be needed
+	html = html[:html.index('<body>')+6] + '\n<div id=graph><svg></svg></div>\n'
+
+	with gzip.open(p_repo / 'd3.v7.min.js.gz') as d3_src:
+		script_d3 = f'<script>\n{d3_src.read().decode().strip()}\n</script>'
+	script_webui = f'<script>\n{(p_repo / "webui.js").read_text().strip()}\n</script>'
+	script_data = dd(f'''
+		<script>
+		let b64 = '{base64.b64encode(data).decode()}'
+		window.aqm_opts = {{
+			time_now: {int(data_ts)},
+			d3_try_local: 0,
+			d3_from_cdn: 0,
+			data: new DataView(
+				Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer ) }}
+		</script>''')
+
+	html += f'\n{script_d3}\n\n{script_data}\n\n{script_webui}'
 
 	p_out_html.write_text(html)
 

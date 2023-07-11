@@ -400,7 +400,7 @@ look at what's in such file, or maybe share it, which can be easily done using
 
 Running ``./docs/make-snapshot-html.py samples.8Bms_16Bsen5x_tuples.bin``
 will create a self-contained ``snapshot.html`` file in the current dir,
-with all data and scripts needed for visualization embedded in it.
+with all data and scripts needed for its visualization embedded in it.
 
 Opening such html in any browser (via double-click, File-Open,
 ``python -m http.server``, or dropping it into http-accessible dir somewhere)
@@ -412,14 +412,14 @@ Samples .bin file does not have absolute timestamps in it, only offsets from
 "time of the download", so modification time on the file is used as that baseline,
 and might be important to preserve for time axis on the chart to be correct.
 
-make-snapshot-html.py works by loading the bin file, `docs/snapshot.html`_
+make-snapshot-html.py works by loading the bin file, `docs/index.html`_
 as a template for output, and embeds base64-encoded data and all javascript
 sources into it.
 Needs to be run from repository dir to have access to all these components.
 Doesn't work on exported CSV files, only .bin ones.
 
 .. _docs/make-snapshot-html.py script: docs/make-snapshot-html.py
-.. _docs/snapshot.html: docs/snapshot.html
+.. _docs/index.html: docs/index.html
 
 
 Links

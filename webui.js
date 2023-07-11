@@ -2,7 +2,7 @@
 
 // D3 init
 
-let opts = window.aqm_opts, urls = window.aqm_urls
+let opts = window.aqm_opts || {}, urls = window.aqm_urls || {}
 
 let d3js_api = opts.d3_api || 7,
 	d3js_local_load = opts.d3_try_local || !opts.d3_from_cdn, // true = try local url first
@@ -166,7 +166,8 @@ let vis = d3.select('#graph svg')
 
 let mark_add_ts = ts => null
 Marks: {
-	if (opts.marks_disable) break Marks
+	let marks = d3.select('#marks')
+	if (!marks.node() || opts.marks_disable) break Marks
 
 	let data, bs_max = opts.marks_bs_max,
 		// colors = i-want-hue 100 | ./color-b64sort - -Hs1 -b 09373b:40 -c d2f3ff:40 -c 81b0da
@@ -209,8 +210,8 @@ Marks: {
 			if (c && ts) map[c[1]] = {c: parseInt(c[1]), ts: ts, label: (label || '').trim()}
 			return !tail.length ? map : mmap_tx_parse(tail, map) },
 
-		mta = d3.select('#marks').classed('hide', false).select('textarea'),
-		mta_btn = d3.select('#marks button'),
+		mta = marks.classed('hide', false).select('textarea'),
+		mta_btn = marks.select('button'),
 		mta_update = () => {
 			mta.property('value', mmap_tx())
 			mta_colors_update(); mvis_update() },
@@ -222,7 +223,7 @@ Marks: {
 				mta_btn.property('disabled', true)
 					.attr('title', `Too much data (limit=${bs_max}B)`) } },
 
-		mta_colors = d3.select('#marks div'),
+		mta_colors = marks.select('div'),
 		mta_colors_update = () => mta_colors.selectAll('span')
 			.data(Object.keys(mmap), d => d)
 			.join( en => en.append('span').text(d => `#${d}`)
