@@ -825,7 +825,7 @@ async def main():
 	import sys, io
 	p_err('One of the main components failed, traceback follows...')
 	sys.print_exception(fail)
-	p_err('Starting emergency-WebUI with a traceback page')
+	if not socket: return # no way to display fail-webui - just exit
 
 	err = io.BytesIO()
 	sys.print_exception(fail, err)
@@ -836,6 +836,7 @@ async def main():
 		p_err('[wifi] Connection monitoring task failed, restarting it')
 		wifi = wifi_client(conf.wifi_ap_base, conf.wifi_ap_map)
 
+	p_err('Starting emergency-WebUI with a traceback page')
 	httpd = await asyncio.start_server(
 		lambda sin, sout: main_fail_webui_req(fail, fail_ts, sin, sout),
 		'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
