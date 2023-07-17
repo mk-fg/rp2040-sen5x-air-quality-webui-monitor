@@ -367,9 +367,12 @@ async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
 				while not await sen5x('data_ready'):
 					p_log and p_log('data_ready delay')
 					await asyncio.sleep_ms(200)
+			await srb.lock.acquire()
+			try:
 				ts = time.ticks_ms()
-			data = await sen5x('data_read', parse=p_log, buff=srb.sample_mv(ts))
-			srb.sample_mv_commit(ts)
+				data = await sen5x('data_read', parse=p_log, buff=srb.sample_mv(ts))
+				srb.sample_mv_commit(ts)
+			finally: srb.lock.release()
 			if p_log:
 				pm10, pm25, pm40, pm100, rh, t, voc, nox = data
 				p_log(f'data: {pm10=} {pm25=} {pm40=} {pm100=} {rh=} {t=} {voc=} {nox=}')
@@ -412,6 +415,7 @@ class SampleRingBuffer:
 		self.buff = bytearray(self.s0 + self.sbs * self.n_max)
 		self.buff_mv = memoryview(self.buff)
 		self.buff_mv_err = self.buff_mv[:self.ebs]
+		self.lock = asyncio.Lock() # to avoid read/write races
 
 	def sample_mv(self, ts):
 		# Returns memoryview to store new sample into
@@ -507,15 +511,19 @@ class WebUI:
 			data_marks=(b'/data/marks.bin',), act_fan_clean=(b'/fan-clean',) )
 		self.req_url_links = dict(( k, self.url_prefix +
 			url[0].decode().lstrip('/') ) for k, url in self.req_url_map.items())
-
-	async def run_server(self, server):
-		await server.wait_closed()
-		raise RuntimeError('BUG - httpd server stopped unexpectedly')
+		self.req_url_locks = dict.fromkeys(
+			['data_csv', 'data_bin', 'data_raw'], self.srb.lock )
 
 	async def request(self, sin, sout):
+		try: await self._request(sin, sout)
+		finally:
+			sin.close(); sout.close()
+			await asyncio.gather(sin.wait_closed(), sout.wait_closed())
+
+	async def _request(self, sin, sout):
 		self.req_n += 1
-		req = self.Req( sin=sin, sout=sout,
-			url_map=self.req_url_map, url_links=self.req_url_links,
+		req = self.Req( sin=sin, sout=sout, url_map=self.req_url_map,
+			url_links=self.req_url_links, url_locks=self.req_url_locks,
 			log=self.verbose and (lambda *a,_pre=f'[http.{self.req_n:03d}]': print(_pre, *a)) )
 		req.log and req.log('Connected:', req.sin.get_extra_info('peername'))
 		line = (await sin.readline()).strip()
@@ -529,9 +537,7 @@ class WebUI:
 		except Exception as err:
 			if isinstance(err, OSError) and err.errno == 104: pass # ECONNRESET
 			else: req.log and req.log(f'Request-exc: {err_fmt(err)}')
-		finally:
-			self.req_lock.release(); req.sin.close(); req.sout.close()
-			await asyncio.gather(req.sin.wait_closed(), req.sout.wait_closed())
+		finally: self.req_lock.release()
 
 	def res_err(self, req, code, msg={
 			400: 'Bad Request', 405: 'Method Not Allowed',
@@ -595,7 +601,10 @@ class WebUI:
 		for k, k_url in req.url_map.items():
 			if req.url not in k_url: continue
 			req.log and req.log(f'Handler: {k}')
-			await getattr(self, f'req_{k}')(req)
+			if lock := req.url_locks.get(k): await lock.acquire()
+			try: await getattr(self, f'req_{k}')(req)
+			finally:
+				if lock: lock.release()
 			break
 		else: self.res_err(req, 404)
 		await req.sout.drain(); req.sout.close()
