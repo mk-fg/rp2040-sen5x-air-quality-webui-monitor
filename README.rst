@@ -382,8 +382,8 @@ It can be done something like this:
 Even more optimization can be done by embedding "frozen bytecode" into board's
 micropython firmware image using a manifest file, in which case it will run
 directly from flash storage and not use RAM for that - faster, and leaving more
-memory to buffer samples (by about 15 KiB I think), but a bit more hassle to
-build/upload - see documentation on `MicroPython manifest files`_ for how to do it.
+memory to buffer samples (by ~21 KiB I think), but a bit more hassle to build/upload -
+see documentation on `MicroPython manifest files`_ for how to do it.
 
 .. _parse and then byte-compile:
   https://docs.micropython.org/en/latest/reference/constrained.html#compilation-phase
@@ -437,6 +437,5 @@ Links
 TODO
 ----
 
-- Robust error wrapping in WebUI, displaying last exception or component failures there.
 - Enable WDT, if available on RP2040, displaying reboots via it as an error in WebUI.
 - More mobile-friendly WebUI visualizations.

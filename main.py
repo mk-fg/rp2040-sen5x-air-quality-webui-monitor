@@ -1,4 +1,4 @@
-import os, struct, machine, time
+import os, gc, struct, machine, time
 
 try: import network # required for wifi stuff
 except ImportError: network = None
@@ -724,21 +724,15 @@ class WebUI:
 		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
 
 
-async def main():
-	print('--- AQM start ---')
-	conf, components = conf_parse('config.ini'), list()
+async def main_aqm(conf, wifi):
+	components = list()
+	if wifi: components.append(wifi)
 
 	if conf.sensor_sample_count >= 2**16: # 1 MiB ought to be enough for everybody
 		return p_err('Sample count values >65536 are not supported')
 	conf.sensor_sample_interval = int(conf.sensor_sample_interval * 1000)
 	srb = SampleRingBuffer(
 		conf.sensor_sample_interval, conf.sensor_sample_count )
-
-	if conf.wifi_ap_map:
-		if not getattr(network, 'WLAN', None):
-			p_err('No networking/wifi support detected in micropython firmware, aboring')
-			return p_err('Either remove/clear [wifi] config section or replace device/firmware')
-		components.append(wifi_client(conf.wifi_ap_base, conf.wifi_ap_map))
 
 	i2c = dict()
 	if conf.sensor_i2c_freq: i2c['freq'] = conf.sensor_i2c_freq
@@ -757,6 +751,7 @@ async def main():
 		reset=conf.sensor_reset_on_start,
 		verbose=conf.sensor_verbose ))
 
+	httpd = webui = None
 	if socket:
 		webui = WebUI( srb, page_title=conf.webui_title,
 			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
@@ -764,13 +759,88 @@ async def main():
 			marks_bs_max=conf.webui_marks_storage_bytes,
 			fan_clean_func_iter=sen5x.fan_clean_func_iter(
 				int(conf.sensor_fan_clean_min_interval * 1000) ) )
-		httpd = await asyncio.start_server( webui.request,
-			'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
-		components.append(webui.run_server(httpd))
 	else: p_err('Socket API not supported in micropython firmware, not starting WebUI')
 
-	try: await asyncio.gather(*components)
-	finally: print('--- AQM stop ---')
+	print('--- AQM start ---')
+	try:
+		if webui:
+			httpd = await asyncio.start_server( webui.request,
+				'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
+			components.append(httpd.wait_closed())
+		await asyncio.gather(*components)
+	finally:
+		if httpd: httpd.close(); await httpd.wait_closed() # to reuse socket for err-msg
+		print('--- AQM stop ---')
+
+async def main_fail_webui_req(fail, fail_ts, sin, sout, _html=(
+		b'<!DOCTYPE html>\n<head><meta charset=utf-8>\n'
+		b'<style>\nbody { margin: 0 auto; padding: 1em;\n'
+		b' max-width: 960px; color: #d2f3ff; background: #09373b; }\n'
+		b'a { color: #5dcef5; } p { font-weight: bold; }\n</style>\n'
+		b'<body><h2>Fatal Error - Unexpected component failure</h2>\n<pre>' )):
+	try:
+		fid, td = (str(v).encode() for v in [fail_ts, time.ticks_diff(time.ticks_ms(), fail_ts)])
+		try:
+			verb, url, proto = (await sin.readline()).split(None, 2)
+			if url.lower().endswith(b'/reset.' + fid): return machine.reset()
+		except ValueError: pass
+		while (await sin.readline()).strip(): pass # flush request
+		sout.write( b'HTTP/1.0 500 Server Error\r\nServer: aqm\r\n'
+			b'Cache-Control: no-cache\r\nContent-Type: text/html\r\n' )
+		tail = b'''</pre>\n<div id=tail><script>
+			let tz = Intl.DateTimeFormat().resolvedOptions().timeZone,
+				dt = new Intl.DateTimeFormat('sv-SE', {
+					timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+					hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+				.format(new Date(Date.now() - %td))
+			document.getElementById('tail').innerHTML =
+				`<p>Error date/time: ${dt} [${tz}]</p>
+					<a href=reset.%fid>Reset Device</a>`
+			</script>'''.replace(b'\t', b' ').replace(b'%fid', fid).replace(b'%td', td)
+		sout.write(f'Content-Length: {len(_html) + len(fail) + len(tail)}\r\n\r\n')
+		sout.write(_html); sout.write(fail); sout.write(tail)
+		await sout.drain()
+	finally:
+		sin.close(); sout.close()
+		await asyncio.gather(sin.wait_closed(), sout.wait_closed())
+
+async def main():
+	print('--- AQM init ---')
+	wifi, conf = None, conf_parse('config.ini')
+
+	if conf.wifi_ap_map:
+		if not getattr(network, 'WLAN', None):
+			p_err('No networking/wifi support detected in micropython firmware, aboring')
+			return p_err('Either remove/clear [wifi] config section or replace device/firmware')
+		wifi = asyncio.create_task(wifi_client(conf.wifi_ap_base, conf.wifi_ap_map))
+
+	fail = None
+	try: return await main_aqm(conf, wifi)
+	except Exception as err: fail = err
+	fail_ts = time.ticks_ms()
+
+	gc.collect() # in case it was a mem shortage
+	gc.threshold(gc.mem_free() // 4 + gc.mem_alloc())
+
+	import sys, io
+	p_err('One of the main components failed, traceback follows...')
+	sys.print_exception(fail)
+	p_err('Starting emergency-WebUI with a traceback page')
+
+	err = io.BytesIO()
+	sys.print_exception(fail, err)
+	err, fail = None, err.getvalue()
+	fail = fail.replace(b'&', b'&amp;').replace(b'<', b'&lt;').replace(b'>', b'&gt;')
+
+	if wifi and wifi.done():
+		p_err('[wifi] Connection monitoring task failed, restarting it')
+		wifi = wifi_client(conf.wifi_ap_base, conf.wifi_ap_map)
+
+	httpd = await asyncio.start_server(
+		lambda sin, sout: main_fail_webui_req(fail, fail_ts, sin, sout),
+		'0.0.0.0', conf.webui_port, backlog=conf.webui_conn_backlog )
+	await asyncio.gather(httpd.wait_closed(), *([wifi] if wifi else []))
+	raise RuntimeError('BUG - fail-webui stopped unexpectedly')
 
 def run(): asyncio.run(main())
 if __name__ == '__main__': run()
