@@ -791,7 +791,7 @@ class UDPAlerts:
 		while True:
 			try: pkt, addr = self.sock.recvfrom(128)
 			except OSError as err:
-				if err.errno == 11: break
+				if err.errno == 11: break # EAGAIN
 				raise
 			if self.crc16(pkt[:-2]) != int.from_bytes(pkt[-2:], 'big'):
 				self.log and self.log(f'pkt crc16-mismatch {addr}')
@@ -813,16 +813,24 @@ class UDPAlerts:
 			if not a <= data[n] <= b: errs.add(k)
 		if not errs: return # all within bounds
 
-		ts = time.ticks_ms()
-		dst_addrs = list( addr for ak, addr in self.dst_addrs.items()
-			if any(self.snooze_ts.get((ak, key), 0) <= ts for key in errs) )
+		ts, dst_addrs = time.ticks_ms(), list()
+		for ak, addr in self.dst_addrs.items():
+			for key in errs:
+				if not (ts_snooze := self.snooze_ts.get((ak, key))): break
+				if time.ticks_diff(ts, ts_snooze) >= 0: del self.snooze_ts[ak, key]; break
+			else: continue
+			dst_addrs.append(addr)
 		if not dst_addrs: return # all suppressed
 
 		pkt = sample + ' '.join(sorted(errs)).encode()
 		pkt += self.crc16(pkt).to_bytes(2, 'big')
 		self.log and self.log( 'sending alert pkt to'
 			f' {len(dst_addrs)} addr(s) [ {len(pkt):,d} B]: {errs}' )
-		for addr in dst_addrs: self.sock.sendto(pkt, addr)
+		for addr in dst_addrs:
+			try: self.sock.sendto(pkt, addr)
+			except OSError as err:
+				if err.errno not in (11, 113): raise # EAGAIN, EHOSTUNREACH
+				self.log and self.log(f'pkt send failed - {err_fmt(err)}')
 
 
 async def main_aqm(conf, wifi):
