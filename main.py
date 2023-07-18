@@ -39,7 +39,14 @@ class AQMConf:
 	webui_d3_api = 7
 	webui_d3_load_from_internet = False
 
-p_err = lambda *a: print('ERROR:', *a) or 1
+	alerts_verbose = False
+	alerts_nx = -999.0
+	alerts_max_pm = alerts_min_t = alerts_max_t = alerts_nx
+	alerts_min_rh = alerts_max_rh = alerts_max_voc = alerts_max_nox = alerts_nx
+	alerts_send_to = ''
+	alerts_bind_port = 5683
+
+p_err = lambda *a: print('ERROR:', *a)
 err_fmt = lambda err: f'[{err.__class__.__name__}] {err}'
 
 def token_bucket_iter(spec): # spec = N / M[smhd], e.g. 10 / 15m
@@ -174,7 +181,7 @@ def conf_parse(conf_file):
 			else: p_err(f'[conf.wifi] Unrecognized config key [ {key_raw} ]')
 		conf.wifi_ap_base, conf.wifi_ap_map = ap_map.pop(None), ap_map
 
-	for sk in 'sensor', 'webui':
+	for sk in 'sensor', 'webui', 'alerts':
 		if not (sec := conf_lines.get(sk)): continue
 		for key_raw, key, val in sec:
 			key_conf = f'{sk}_{key}'
@@ -333,7 +340,7 @@ class Sen5x:
 
 async def sen5x_poller(
 		sen5x, srb, td_data, td_errs, err_rate_limit,
-		reset=False, stop=False, verbose=False ):
+		reset=False, stop=False, alerts=None, verbose=False ):
 	p_log = verbose and (lambda *a: print('[sensor]', *a))
 	if reset: await sen5x('reset')
 	await sen5x('meas_start')
@@ -342,7 +349,7 @@ async def sen5x_poller(
 	try:
 		err_last = ValueError('Invalid error rate-limiter settings')
 		while next(err_rate_limit):
-			try: await _sen5x_poller(sen5x, srb, td_data, td_errs, p_log)
+			try: await _sen5x_poller(sen5x, srb, alerts, td_data, td_errs, p_log)
 			except Sen5x.Sen5xError as err:
 				p_log and p_log(f'Sen5x poller failure: {err_fmt(err)}')
 				err_last = err
@@ -354,7 +361,7 @@ async def sen5x_poller(
 				p_err(f'Failed to stop measurement mode: {err_fmt(err)}')
 			p_log and p_log('Stopped measurement mode')
 
-async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
+async def _sen5x_poller(sen5x, srb, alerts, td_data, td_errs, p_log):
 	errs_seen, td_slack = set(), 10 # less loops when sleep() wakes up early
 	ts_data = ts_errs = -1 # time of last data/errs poll
 	while True:
@@ -369,10 +376,11 @@ async def _sen5x_poller(sen5x, srb, td_data, td_errs, p_log):
 					await asyncio.sleep_ms(200)
 			await srb.lock.acquire()
 			try:
-				ts = time.ticks_ms()
-				data = await sen5x('data_read', parse=p_log, buff=srb.sample_mv(ts))
+				ts, buff = time.ticks_ms(), srb.sample_mv(ts)
+				data = await sen5x('data_read', parse=p_log, buff=buff)
 				srb.sample_mv_commit(ts)
 			finally: srb.lock.release()
+			if alerts: alerts.check(data, bytes(buff))
 			if p_log:
 				pm10, pm25, pm40, pm100, rh, t, voc, nox = data
 				p_log(f'data: {pm10=} {pm25=} {pm40=} {pm100=} {rh=} {t=} {voc=} {nox=}')
@@ -724,8 +732,102 @@ class WebUI:
 		req.sout.write(f'Location: {req.url_links["page_index"] or "/"}\r\n\r\n'.encode())
 
 
+class UDPAlerts:
+
+	keys = 'pm', 'pm', 'pm', 'pm', 'rh', 't', 'voc', 'nox'
+
+	@staticmethod
+	def addr_key(addr):
+		if '.' in addr: return bytes(int(v) for v in addr.split('.'))
+		raise NotImplementedError # listening addrs are IPv4 anyway
+
+	@classmethod
+	def create_if_needed(cls, conf):
+		bounds, nx = list(), conf.alerts_nx
+		for n, k in enumerate(cls.keys):
+			a, b = (getattr(conf, f'alerts_{b}_{k}', nx) for b in ('min', 'max'))
+			a_nx, b_nx = a == nx, b == nx
+			if a_nx and b_nx: continue
+			elif a_nx: a = -999.0
+			elif b_nx: b = 999.0
+			bounds.append((n, k, a, b))
+		if not ( (bounds := tuple(bounds))
+			and (dst_list := conf.alerts_send_to.split()) ): return
+		if not socket:
+			return p_err( 'Socket API not supported in'
+				' micropython firmware, not enabling UDP alerts' )
+		dst_addrs = dict()
+		for n, sock in enumerate(dst_list):
+			addr, _, port = sock.partition(':')
+			addr = socket.getaddrinfo( addr,
+				int(port or 0), socket.AF_INET, socket.SOCK_DGRAM )[0][-1]
+			dst_addrs[cls.addr_key(addr[0])] = addr
+		return UDPAlerts( conf.alerts_bind_port,
+			dst_addrs, bounds, verbose=conf.alerts_verbose )
+
+	def __init__(self, bind_port, dst_addrs, bounds, verbose=False):
+		self.dst_addrs, self.bounds, self.snooze_ts = dst_addrs, bounds, dict()
+		self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+		self.sock.bind(('0.0.0.0', bind_port))
+		self.sock.setblocking(False)
+		self.log = verbose and (lambda *a: print('[alerts]', *a))
+		self.log and self.log( 'Checking/sending UDP-alerts to'
+			f' {len(self.dst_addrs)} host(s) ({len(self.bounds)} bounds)' )
+
+	def crc16(self, s, crc=0):
+		# CRC-16F/5 CRC-16-OpenSafety-A {241,241,241,35,10,8,3}
+		# See https://users.ece.cmu.edu/~koopman/crc/crc16.html
+		for c in s:
+			m = 0x100
+			while m := m >> 1:
+				bit = bool(crc & 0x8000) ^ bool(c & m)
+				crc <<= 1
+				if bit: crc ^= 0x5935
+			crc &= 0xffff
+		return crc & 0xffff
+
+	def check(self, data, sample):
+		ts = time.ticks_ms()
+		while True:
+			try: pkt, addr = self.sock.recvfrom(128)
+			except OSError as err:
+				if err.errno == 11: break
+				raise
+			if self.crc16(pkt[:-2]) != int.from_bytes(pkt[-2:], 'big'):
+				self.log and self.log(f'pkt crc16-mismatch {addr}')
+			try:
+				(td,), errs = struct.unpack('>d', pkt[:8]), pkt[8:-2]
+				errs = set(self.keys).intersection(errs.decode().split())
+				if not errs: raise ValueError('no alert-keys to suppress')
+			except ValueError as err:
+				self.log and self.log(f'pkt processing error {addr}: {err_fmt(err)}')
+			if (ak := self.addr_key(addr[0])) not in self.dst_addrs:
+				self.log and self.log(f'skipping pkt from unknown source {addr}')
+				continue
+			ts_pkt = time.ticks_add(ts, int(td * 1000))
+			for key in errs: self.snooze_ts[ak, key] = ts_pkt
+			self.log and self.log(f'updated snooze-ts for keys {addr}: {errs}')
+
+		errs = set()
+		for n, k, a, b in self.bounds:
+			if not a <= data[n] <= b: errs.add(k)
+		if not errs: return # all within bounds
+
+		ts = time.ticks_ms()
+		dst_addrs = list( addr for ak, addr in self.dst_addrs.items()
+			if any(self.snooze_ts.get((ak, key), 0) <= ts for key in errs) )
+		if not dst_addrs: return # all suppressed
+
+		pkt = sample + ' '.join(sorted(errs)).encode()
+		pkt += self.crc16(pkt).to_bytes(2, 'big')
+		self.log and self.log( 'sending alert pkt to'
+			f' {len(dst_addrs)} addr(s) [ {len(pkt):,d} B]: {errs}' )
+		for addr in dst_addrs: self.sock.sendto(pkt, addr)
+
+
 async def main_aqm(conf, wifi):
-	components = list()
+	httpd = webui = None
+	components, webui_opts = list(), dict()
 	if wifi: components.append(wifi)
 
 	if conf.sensor_sample_count >= 2**16: # 1 MiB ought to be enough for everybody
@@ -733,6 +835,7 @@ async def main_aqm(conf, wifi):
 	conf.sensor_sample_interval = int(conf.sensor_sample_interval * 1000)
 	srb = SampleRingBuffer(
 		conf.sensor_sample_interval, conf.sensor_sample_count )
+	alerts = UDPAlerts.create_if_needed(conf)
 
 	i2c = dict()
 	if conf.sensor_i2c_freq: i2c['freq'] = conf.sensor_i2c_freq
@@ -749,16 +852,15 @@ async def main_aqm(conf, wifi):
 		err_rate_limit=token_bucket_iter(conf.sensor_i2c_error_limit),
 		stop=conf.sensor_stop_on_exit,
 		reset=conf.sensor_reset_on_start,
-		verbose=conf.sensor_verbose ))
+		alerts=alerts, verbose=conf.sensor_verbose ))
+	webui_opts['fan_clean_func_iter'] = \
+		sen5x.fan_clean_func_iter(int(conf.sensor_fan_clean_min_interval * 1000))
 
-	httpd = webui = None
 	if socket:
 		webui = WebUI( srb, page_title=conf.webui_title,
 			url_prefix=conf.webui_url_prefix, verbose=conf.webui_verbose,
 			d3_api=conf.webui_d3_api, d3_remote=conf.webui_d3_load_from_internet,
-			marks_bs_max=conf.webui_marks_storage_bytes,
-			fan_clean_func_iter=sen5x.fan_clean_func_iter(
-				int(conf.sensor_fan_clean_min_interval * 1000) ) )
+			marks_bs_max=conf.webui_marks_storage_bytes, **webui_opts )
 	else: p_err('Socket API not supported in micropython firmware, not starting WebUI')
 
 	print('--- AQM start ---')
@@ -794,8 +896,7 @@ async def main_fail_webui_req(fail, fail_ts, sin, sout, _html=(
 					hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
 				.format(new Date(Date.now() - %td))
 			document.getElementById('tail').innerHTML =
-				`<p>Error date/time: ${dt} [${tz}]</p>
-					<a href=reset.%fid>Reset Device</a>`
+				`<p>Error date/time: ${dt} [${tz}]</p><a href=reset.%fid>Reset Device</a>`
 			</script>'''.replace(b'\t', b' ').replace(b'%fid', fid).replace(b'%td', td)
 		sout.write(f'Content-Length: {len(_html) + len(fail) + len(tail)}\r\n\r\n')
 		sout.write(_html); sout.write(fail); sout.write(tail)

@@ -316,11 +316,12 @@ Samples should be returned in most-recent-first order, but with (relative)
 timestamps in there, it's more like an implementation detail and shouldn't
 matter or be relied upon.
 
-Exported binary file can be put into `docs <docs>`_ dir (instead of
+Exported binary file can be dropped into `docs <docs>`_ dir (instead of
 ``samples.8Bms_16Bsen5x_tuples.bin`` example file there) to see the data
-via same WebUI anytime later - run ``python3 docs/run-webui-http-server.py``
-and access it on http://localhost:8000 , or ``python -m http.server``,
-or anything else that can serve static files over http.
+via same WebUI anytime later (via ``python3 docs/run-webui-http-server.py``
+on http://localhost:8000 or ``python3 -m http.server``), or also it can be
+converted to single-file html vis - see `Convert exported samples.bin into
+an interactive chart file`_ section below for more info on that.
 
 .. _comma-separated values: https://en.wikipedia.org/wiki/Comma-separated_values
 .. _MS Excel: https://en.wikipedia.org/wiki/Microsoft_Excel
@@ -420,6 +421,47 @@ Doesn't work on exported CSV files, only .bin ones.
 
 .. _docs/make-snapshot-html.py script: docs/make-snapshot-html.py
 .. _docs/index.html: docs/index.html
+
+
+Alerts
+------
+
+Poller can send simple UDP "value over threshold" alerts from the device to
+specified destination, and snooze those per-dst if it gets responses.
+See ``[alerts]`` section in config.example.ini_ for enabling that.
+
+These are not intended for long-term reliable alerting/monitoring or controlling
+anything important, but for transient info like desktop notifications
+(see e.g. `aqm-alerts script`_ for that use-case).
+
+Alert UDP-packet payload format::
+
+  <alert> ::= <data> <crc [2B]>
+  <data> ::= <sen5x_sample [16B]> <over_threshold_keys>
+  <over_threshold_keys> ::= <key> [ " " <over_threshold_keys> ]
+  <key> ::= "pm" | "rh" | "t" | "voc" | "nox"
+  <crc> ::= CRC-16-OpenSafety-A( <data> )
+
+CRC-16 used here is a simple CRC-16F/5 / 254465s / CRC-16-OpenSafety-A with
+0x5935/0xAC9A polynomial and no xor/reverse nonsense (see `16-bit CRC Zoo`_
+for more info).
+``<sen5x_sample>`` is same data as received from the sensor (circa crc8
+checksums), and same as in binary `Data export formats`_.
+
+Alert packets should be generated for every over-threshold sample,
+unless suppressed with a response packet to origin socket, with a list
+of threshold-keys to ignore and for how long (in seconds)::
+
+  <alert_snooze> ::= <data> <crc [2B]>
+  <data> ::= <seconds [double]> <snooze_keys>
+  <snooze_keys> ::= <key> [ " " <snooze_keys> ]
+
+If alert was processed successfully, such reply can have a list of keys from
+the received packet, sent back to its address/port, with whatever relevant
+snooze-delay, which will suppress alerts for any subset of keys to this address.
+
+.. _aqm-alerts script: https://github.com/mk-fg/fgtk#aqm-alerts
+.. _16-bit CRC Zoo: https://users.ece.cmu.edu/~koopman/crc/crc16.html
 
 
 Links
