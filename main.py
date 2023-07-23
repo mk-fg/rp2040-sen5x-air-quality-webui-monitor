@@ -68,7 +68,7 @@ webui_head = b'''<!DOCTYPE html>
 :root { --c-fg: #d2f3ff; --c-bg: #09373b; }
 body { margin: 0 auto; padding: 1em;
 	max-width: 960px; color: var(--c-fg); background: var(--c-bg); }
-a { color: #5dcef5; } a:visited { color: #b092db; }
+a, a:visited { color: #5dcef5; }
 svg g { color: #d2f3ff; }
 svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
 svg .axis { opacity: 0.5; } .axis.fg { opacity: 1; } .axis text { fill: currentColor; }
@@ -886,7 +886,7 @@ async def main_fail_webui_req(fail, fail_ts, sin, sout, _html=(
 		b'<!DOCTYPE html>\n<head><meta charset=utf-8>\n'
 		b'<style>\nbody { margin: 0 auto; padding: 1em;\n'
 		b' max-width: 960px; color: #d2f3ff; background: #09373b; }\n'
-		b'a { color: #5dcef5; } p { font-weight: bold; }\n</style>\n'
+		b'a, a:visited { color: #5dcef5; } p { font-weight: bold; }\n</style>\n'
 		b'<body><h2>Fatal Error - Unexpected component failure</h2>\n<pre>' )):
 	try:
 		fid, td = (str(v).encode() for v in [fail_ts, time.ticks_diff(time.ticks_ms(), fail_ts)])
