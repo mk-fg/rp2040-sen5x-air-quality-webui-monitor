@@ -29,6 +29,9 @@ class AQMConf:
 	sensor_i2c_freq = 100_000 # 0 = machine.I2C default, sen5x has 100kbps max
 	sensor_i2c_timeout = 0.0 # 0 = machine.I2C default
 	sensor_i2c_error_limit = '8 / 3m' # abort on >8 errs in 3m(ins) (or s/m/h/d units)
+	sensor_temp_comp_offset = 0.0
+	sensor_temp_comp_slope = 0.0
+	sensor_temp_comp_time_const = 0
 
 	webui_verbose = False
 	webui_port = 80
@@ -264,6 +267,9 @@ class Sen5x:
 		meas_stop = (b'\x01\x04', 0.16),
 		reset = (b'\xd3\x04', 0.1),
 		clean_fan = (b'\x56\x07', 0.02),
+		temp_offset_get = (b'`\xb2', 0.02),
+		temp_offset_set = ( b'`\xb2', 0.02, lambda offset, slope, time_const:
+			struct.pack('>hhH', round(offset * 200), round(slope * 10_000), time_const) ),
 		data_ready = (b'\x02\x02', 0.02, 3, lambda rx: rx[1] != 0),
 		data_read = (b'\x03\xc4', 0.02, sample_bs + sample_bs // 2, _sample),
 		errs_read = (b'\xd2\x06', 0.02, errs_bs + errs_bs // 2, _errs),
@@ -288,18 +294,30 @@ class Sen5x:
 		self.rx_mv, self.rx_buff = memoryview(rx := bytearray(24)), rx
 		self.cmd_ms_last = self.cmd_ms_wait = -1
 
-	async def __call__(self, cmd_name, parse=True, buff=None):
-		if len(cmd := self.cmd_map[cmd_name]) == 2:
-			cmd, delay = cmd; rx_bytes = rx_parser = 0
+	async def __call__(self, cmd_name, *cmd_args, parse=True, buff=None):
+		tx_bytes = rx_bytes = rx_parser = 0
+		if len(cmd := self.cmd_map[cmd_name]) == 2: cmd, delay = cmd
+		elif len(cmd) == 3:
+			cmd, delay, tx_bytes = cmd
+			cmd_args, tx_bytes = None, tx_bytes(*cmd_args)
 		else:
 			cmd, delay, rx_bytes, rx_parser = cmd
 			if not parse: rx_parser = None
+		if cmd_args: raise ValueError(f'Arguments to no-TX SEN5x command: {cmd_args}')
 		await self.cmd_lock.acquire()
-		try: return await self._run(cmd, delay, rx_bytes, rx_parser, buff)
+		try: return await self._run(cmd, delay, tx_bytes, rx_bytes, rx_parser, buff)
 		except OSError as err: raise self.Sen5xError(f'I2C I/O failure: {err_fmt(err)}')
 		finally: self.cmd_lock.release()
 
-	async def _run(self, cmd, delay, rx_bytes, rx_parser, rx_smv, crc_map=crc_map):
+	async def _run( self, cmd, delay,
+			tx_bytes, rx_bytes, rx_parser, rx_smv, crc_map=crc_map ):
+		if tx_bytes:
+			tx = bytearray((n := len(tx_bytes)) + n // 2)
+			for n in range(0, n, 2):
+				(b1, b2), m = tx_bytes[n:n+2], 3 * n // 2
+				tx[m], tx[m+1], tx[m+2] = b1, b2, crc_map[b2 ^ crc_map[b1 ^ 0xff]]
+			cmd += tx
+
 		if rx_bytes:
 			rx = self.rx_mv
 			if (n := rx_bytes - len(rx)) > 0:
@@ -340,9 +358,8 @@ class Sen5x:
 
 async def sen5x_poller(
 		sen5x, srb, td_data, td_errs, err_rate_limit,
-		reset=False, stop=False, alerts=None, verbose=False ):
+		stop_on_exit=False, alerts=None, verbose=False ):
 	p_log = verbose and (lambda *a: print('[sensor]', *a))
-	if reset: await sen5x('reset')
 	await sen5x('meas_start')
 	p_log and p_log('Started measurement mode')
 	await asyncio.sleep(1) # avoids unnecessary data_ready checks
@@ -355,7 +372,7 @@ async def sen5x_poller(
 				err_last = err
 		p_err(f'Sensor-poll failure rate-limiting: {err_fmt(err_last)}')
 	finally:
-		if stop:
+		if stop_on_exit:
 			try: await sen5x('meas_stop')
 			except Exception as err: # avoid hiding original exception, if any
 				p_err(f'Failed to stop measurement mode: {err_fmt(err)}')
@@ -853,13 +870,22 @@ async def main_aqm(conf, wifi):
 	i2c = machine.I2C( conf.sensor_i2c_n,
 		sda=machine.Pin(conf.sensor_i2c_pin_sda),
 		scl=machine.Pin(conf.sensor_i2c_pin_scl), **i2c )
+
 	sen5x = Sen5x(i2c, conf.sensor_i2c_addr)
+	if conf.sensor_reset_on_start: await sen5x('reset')
+	if ( conf.sensor_temp_comp_offset
+			or conf.sensor_temp_comp_slope
+			or conf.sensor_temp_comp_time_const ):
+		await sen5x( 'temp_offset_set',
+			conf.sensor_temp_comp_offset,
+			conf.sensor_temp_comp_slope,
+			conf.sensor_temp_comp_time_const )
+
 	components.append(sen5x_poller(
 		sen5x, srb, td_data=conf.sensor_sample_interval,
 		td_errs=int(conf.sensor_error_check_interval * 1000),
 		err_rate_limit=token_bucket_iter(conf.sensor_i2c_error_limit),
-		stop=conf.sensor_stop_on_exit,
-		reset=conf.sensor_reset_on_start,
+		stop_on_exit=conf.sensor_stop_on_exit,
 		alerts=alerts, verbose=conf.sensor_verbose ))
 	webui_opts['fan_clean_func_iter'] = \
 		sen5x.fan_clean_func_iter(int(conf.sensor_fan_clean_min_interval * 1000))
