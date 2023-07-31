@@ -15,13 +15,13 @@ class ReqHandler(srv.SimpleHTTPRequestHandler):
 		return super().guess_type(path)
 
 	def parse_request(self):
+		self.path_compressed = False
 		res = super().parse_request()
 		for k in 'If-Modified-Since If-None-Match'.split():
 			if k in self.headers: del self.headers[k] # disable http.server caches
 		return res
 
 	def translate_path(self, path):
-		self.path_compressed = False
 		path = super().translate_path(path)
 		if not (p := pl.Path(path)).exists():
 			p = p.parent.parent / p.name # up from docs/ into repo dir

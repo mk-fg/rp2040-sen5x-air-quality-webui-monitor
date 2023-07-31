@@ -21,7 +21,8 @@ let d3js_api = opts.d3_api || 7,
 			+ ` [ ${d3js_local_url} ]: ${res.status} - ${res.statusText}` )
 		if (d3js_local_load)
 			console.log(`WARNING: importing d3 from ${d3js_remote_import}`)
-		return await import(d3js_remote_import) }
+		try { return await import(d3js_remote_import) }
+		catch (err) { console.log(`ERROR: failed to import d3 from ${d3js_remote_import}`) } }
 
 window.onload = () => d3js_loader().then(async d3 => {
 if (!d3) return document.getElementById('graph').innerHTML = `
@@ -32,8 +33,8 @@ if (!d3) return document.getElementById('graph').innerHTML = `
 
 // Shared helpers
 
-let fetch_data = url => fetch(url).then(async res => {
-		if (!res.ok) throw `HTTP Error [ ${url} ]: ${res.status} ${res.statusText}`
+let fetch_data = req => fetch(req).then(async res => {
+		if (!res.ok) throw `HTTP Error [ ${req.url || req} ]: ${res.status} ${res.statusText}`
 		return new DataView(await res.arrayBuffer()) })
 	.catch(res => d3.select('#errors').append('li').text(res) && null)
 
