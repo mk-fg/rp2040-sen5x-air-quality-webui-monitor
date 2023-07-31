@@ -86,7 +86,7 @@ which needs following things in order to work:
   in which case script should be able to run on devices that don't have it,
   logging data to console if verbose=yes is enabled in ``[sensor]`` section.
 
-- Optional step, to actually see data the browser - upload ``webui.js.gz``,
+- Optional step, to actually see data in the browser - upload ``webui.js.gz``,
   ``d3.v7.min.js.gz``, ``favicon.ico.gz`` files to the device flash as well.
 
   ``gzip <webui.js >webui.js.gz`` can be used to make compressed version of
@@ -147,8 +147,8 @@ Pinout diagram of the device used to run the main script should have I2C
 (aka I²C, IIC) bus pins (SDA/SCL for data/clock), as well as GND and 5V voltage
 pins (or VBUS/VSYS - same thing as 5V for the purposes of connecting the sensor).
 
-SEN5x should be connected to same SDA/SCL I2C pins, powered via VDD/GND pins,
-and have its SEL pin connected to same GND pin as well:
+SEN5x should be connected to same I2C SDA/SCL pins, powered via VDD/GND pins,
+and have its SEL pin connected to GND pin as well:
 
 .. image:: https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/wiring-example.jpg
    :width: 100%
@@ -472,8 +472,14 @@ Links
 
 - `Sensirion/python-i2c-sen5x`_ - SEN5x vendor python driver code and examples (not used here).
 
+- `AirGradient Open Air`_ - a product similar to what this project does.
+
+  Intended to send data to "cloud" over internet, uses different sensors,
+  can also be built from parts, has open-source firmware (and bunch of forks of it).
+
 .. _ESPHome: https://esphome.io/components/sensor/sen5x.html
 .. _Sensirion/python-i2c-sen5x: https://github.com/Sensirion/python-i2c-sen5x
+.. _AirGradient Open Air: https://www.airgradient.com/open-air/
 
 
 TODO
