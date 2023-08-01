@@ -477,9 +477,12 @@ Links
   Intended to send data to "cloud" over internet, uses different sensors,
   can also be built from parts, has open-source firmware (and bunch of forks of it).
 
+- `IKEA VINDSTYRKA`_ - also a smart air-quality meter with SEN54 sensor.
+
 .. _ESPHome: https://esphome.io/components/sensor/sen5x.html
 .. _Sensirion/python-i2c-sen5x: https://github.com/Sensirion/python-i2c-sen5x
 .. _AirGradient Open Air: https://www.airgradient.com/open-air/
+.. _IKEA VINDSTYRKA: https://github.com/oleksiikutuzov/IKEA-VINDSTYRKA/blob/main/teardown.md
 
 
 TODO
