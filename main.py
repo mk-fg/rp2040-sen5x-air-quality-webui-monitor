@@ -397,10 +397,10 @@ async def _sen5x_poller(sen5x, srb, alerts, td_data, td_errs, p_log):
 				data = await sen5x('data_read', parse=p_log, buff=buff)
 				srb.sample_mv_commit(ts)
 			finally: srb.lock.release()
-			if alerts: alerts.check(data, bytes(buff))
 			if p_log:
 				pm10, pm25, pm40, pm100, rh, t, voc, nox = data
 				p_log(f'data: {pm10=} {pm25=} {pm40=} {pm100=} {rh=} {t=} {voc=} {nox=}')
+			if alerts: alerts.check(data, bytes(buff))
 			if time.ticks_diff(ts := time.ticks_ms(), ts_data) - td_data > td_data:
 				td1, ts_data = td_data, ts # set new ts-base at the start or after skips
 			else: # next poll at ts_loop + td_data, to keep intervals from drifting
