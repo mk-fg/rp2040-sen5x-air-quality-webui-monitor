@@ -36,7 +36,9 @@ if (!d3) return document.getElementById('graph').innerHTML = `
 let fetch_data = req => fetch(req).then(async res => {
 		if (!res.ok) throw `HTTP Error [ ${req.url || req} ]: ${res.status} ${res.statusText}`
 		return new DataView(await res.arrayBuffer()) })
-	.catch(res => d3.select('#errors').append('li').text(res) && null)
+	.catch(err => {
+		console.log(`Fetch ERROR: ${err}`)
+		d3.select('#errors').append('li').text(err) })
 
 let debounce_enabled = true // for debugging
 let debounce = (delay_ms, mode, func) => {
@@ -167,10 +169,11 @@ let vis = d3.select('#graph svg')
 
 let mark_add_ts = ts => null
 Marks: {
-	let marks = d3.select('#marks')
+	let data, marks = d3.select('#marks')
 	if (!marks.node() || opts.marks_disable) break Marks
+	if (!(data = await fetch_data(urls.marks))) break Marks
 
-	let data, bs_max = opts.marks_bs_max,
+	let bs_max = opts.marks_bs_max,
 		// colors = i-want-hue 100 | ./color-b64sort - -Hs1 -b 09373b:40 -c d2f3ff:40 -c 81b0da
 		//   -c fdc28c -c fc9346 -c eb6311 -c bb3d02  -c 54e011 -c 41a6a2 -c d175c1 -c b31b7c
 		colors = ( '4bb7aa a3ea43 afa4dc 8393e4 a97439 aea672 aadddb c790e7 62e74f'
@@ -197,7 +200,7 @@ Marks: {
 			;(new Uint8Array(dv.buffer, n+=4, tx_n)).set(tx)
 			return serialize(dv, n + tx_n, ms, enc) },
 
-		mmap = parse(data = await fetch_data(urls.marks)),
+		mmap = parse(data),
 		mmap_tx = mm => (
 			d3.sort(Object.values(mm || mmap), (a, b) => d3.ascending(a.c, b.c))
 				.map(d => `#${d.c} :: ${fmt_ts_iso8601(d.ts)} :: ${d.label}`)
