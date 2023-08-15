@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
-import os, sys, re, base64, gzip, argparse, textwrap, pathlib as pl
+import pathlib as pl, datetime as dt
+import os, sys, re, base64, gzip, argparse, textwrap
 
 dd = lambda text: re.sub( r' \t+', ' ',
 	textwrap.dedent(text).strip('\n') + '\n' ).replace('\t', '  ')
@@ -18,6 +19,10 @@ def main(argv=None):
 		File's modification time (mtime) is important, and is used
 			as a time when data snapshot was taken mark,
 			with times of all data samples within the file offset relative to that.'''))
+	parser.add_argument('-t', '--datetime-from-filename', action='store_true', help=dd('''
+		Use iso8601 timestamp in the filename as
+			a time of data export, instead of file modification time.
+		Filename example: data.2023-08-08T07:46:46.bin'''))
 	parser.add_argument('-o', '--output-html',
 		metavar='file', default='snapshot.html',
 		help='Path to resulting/output HTML file. Default: %(default)s')
@@ -28,9 +33,15 @@ def main(argv=None):
 	p_data_bin = pl.Path(opts.data_bin).resolve()
 
 	data = p_data_bin.read_bytes()
-	data_ts = p_data_bin.stat().st_mtime
-	html = (p_repo / 'docs/index.html').read_text()
+	if opts.datetime_from_filename:
+		if not (m := re.search( r'(^|.)(\d{4}-\d{2}-\d{2}'
+				r'([ T])\d{2}:\d{2}:\d{2})(.|$)', opts.data_bin )):
+			parser.error( 'Failed to regexp-match iso8601'
+				f' date/time in the filename: {opts.data_bin}' )
+		data_ts = dt.datetime.fromisoformat(m[2]).timestamp()
+	else: data_ts = p_data_bin.stat().st_mtime
 
+	html = (p_repo / 'docs/index.html').read_text()
 	html = html.replace('<head>', dd('''
 		<head>
 		<meta http-equiv=content-security-policy content="
