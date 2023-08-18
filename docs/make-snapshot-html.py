@@ -20,8 +20,8 @@ def main(argv=None):
 			as a time when data snapshot was taken mark,
 			with times of all data samples within the file offset relative to that.'''))
 	parser.add_argument('-t', '--datetime-from-filename', action='store_true', help=dd('''
-		Use iso8601 timestamp in the filename as
-			a time of data export, instead of file modification time.
+		Use iso8601 timestamp in the filename (either prefix/suffix, or
+			dot-separated) as a time of data export, instead of file modification time.
 		Filename example: data.2023-08-08T07:46:46.bin'''))
 	parser.add_argument('-o', '--output-html',
 		metavar='file', default='snapshot.html',
@@ -35,7 +35,7 @@ def main(argv=None):
 	data = p_data_bin.read_bytes()
 	if opts.datetime_from_filename:
 		if not (m := re.search( r'(^|.)(\d{4}-\d{2}-\d{2}'
-				r'([ T])\d{2}:\d{2}:\d{2})(.|$)', opts.data_bin )):
+				r'([ T])\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[-+]\d{2}(:?\d{2})?)?)(.|$)', opts.data_bin )):
 			parser.error( 'Failed to regexp-match iso8601'
 				f' date/time in the filename: {opts.data_bin}' )
 		data_ts = dt.datetime.fromisoformat(m[2]).timestamp()
