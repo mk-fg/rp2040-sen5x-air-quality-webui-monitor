@@ -11,8 +11,7 @@ except ImportError: import asyncio # newer mpy naming
 
 class AQMConf:
 
-	wifi_ap_base = dict(
-		scan_interval=20.0, check_interval=10.0 )
+	wifi_ap_base = dict(scan_interval=20.0, check_interval=10.0)
 	wifi_ap_map = dict()
 
 	sensor_verbose = False
@@ -262,7 +261,7 @@ class Sen5x:
 	sample_bs = 16 # i2c crc8 checksums are already stripped here
 
 	cmd_map = dict(
-		# cmd=(tx_cmd, delay) or (tx_cmd, delay, rx_bytes, rx_parser)
+		# cmd=(tx_cmd, delay[, tx_encoder]) or (tx_cmd, delay, rx_bytes, rx_parser)
 		meas_start=(b'\x00!', 0.05),
 		meas_stop = (b'\x01\x04', 0.16),
 		reset = (b'\xd3\x04', 0.1),
@@ -880,7 +879,6 @@ async def main_aqm(conf, wifi):
 			conf.sensor_temp_comp_offset,
 			conf.sensor_temp_comp_slope,
 			conf.sensor_temp_comp_time_const )
-
 	components.append(sen5x_poller(
 		sen5x, srb, td_data=conf.sensor_sample_interval,
 		td_errs=int(conf.sensor_error_check_interval * 1000),

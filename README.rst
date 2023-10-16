@@ -60,7 +60,7 @@ How to use this
 All functionality on the device is implemented by the `main.py script`_,
 which needs following things in order to work:
 
-- `Micropython firmware`_ installed on the microcontroller (RP2040 or other supported one).
+- `MicroPython firmware`_ installed on the microcontroller (RP2040 or other supported one).
 
   `Download page`_ for it has a silly-long list of supported devices,
   with their own install links/instructions/notes, but on RP2040 it goes something like this:
@@ -74,6 +74,9 @@ which needs following things in order to work:
   mpremote_ tool (use pipx_ for clean installs). Running it should get a python
   shell prompt on connected device, it allows to copy/run files there easily,
   and is used in all examples below.
+
+  Tested to work with micropython 1.20.0 - 1.21.0, and should likely work
+  with all future versions as well, as they rarely break backwards-compatibility.
 
 - ``config.ini`` file with configuration parameters, uploaded to device.
 
@@ -126,7 +129,7 @@ as .mpy file`_ section below for that.
 See `Repository contents`_ below for more information on other optional files.
 
 .. _main.py script: main.py
-.. _Micropython firmware: https://docs.micropython.org/
+.. _MicroPython firmware: https://docs.micropython.org/
 .. _Download page: https://micropython.org/download/
 .. _from rp2-pico-w page: https://micropython.org/download/rp2-pico-w/
 .. _mpremote: https://docs.micropython.org/en/latest/reference/mpremote.html
