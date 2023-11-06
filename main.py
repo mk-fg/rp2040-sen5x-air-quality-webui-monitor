@@ -173,7 +173,7 @@ def conf_parse(conf_file):
 					p_err(f'[conf.wifi] Skipping ssid without config [ {ssid} ]')
 				else:
 					if ssid not in ap_map: ap_map[ssid] = ap_map[None].copy()
-					ap_map[ssid].update(ap, ssid=ssid)
+					ap_map[ssid].update(ap)
 					ap.clear()
 				ssid = val
 			elif key_func := ap_keys.get(key):
@@ -199,6 +199,9 @@ def conf_parse(conf_file):
 
 
 async def wifi_client(ap_base, ap_map):
+	def ssid_str(ssid):
+		try: return ssid.decode() # mpy 1.20 doesn't support errors= handling
+		except UnicodeError: return repr(ssid)[2:-1] # ascii + backslash-escapes
 	p_log = ap_base.get('verbose') and (lambda *a: print('[wifi]', *a))
 	if cc := ap_base.get('country'): network.country(cc)
 	wifi = network.WLAN(network.STA_IF)
@@ -215,14 +218,14 @@ async def wifi_client(ap_base, ap_map):
 			if ap_reconn: # reset same-ssid conn once on hiccups
 				ap_conn, ap_reconn = ap_reconn, None
 			if not ap_conn:
-				ssid_set = set(ap_info[0].decode('surrogateescape') for ap_info in wifi.scan())
-				p_log and p_log(f'Scan results [ {" // ".join(sorted(ssid_set))} ]')
+				ssid_map = dict((ssid_str(ap[0]), ap[0]) for ap in wifi.scan())
+				p_log and p_log(f'Scan results [ {" // ".join(sorted(ssid_map))} ]')
 				for ssid, ap in ap_map.items():
-					if ssid in ssid_set:
-						ap_conn = dict(ap_base, **ap)
+					if ssid_raw := ssid_map.get(ssid):
+						ap_conn = dict(ap_base, ssid=ssid_raw, **ap)
 						break
 			if ap_conn:
-				p_log and p_log(f'Connecting to [ {ap_conn["ssid"]} ]')
+				p_log and p_log(f'Connecting to [ {ssid_str(ap_conn["ssid"])} ]')
 				wifi.config(**dict((k, ap_conn[k]) for k in ap_keys if k in ap_conn))
 				wifi.connect( ssid=ap_conn['ssid'],
 					key=ap_conn['key'] or None, bssid=ap_conn.get('mac') or None )

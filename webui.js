@@ -62,8 +62,7 @@ let ts_now, ts_now_label = '',
 	fmt_ts_iso8601 = (ts, time, fmt) => {
 		fmt = fmt || { timeZone: fmt_ts_tz,
 			hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }
-		if (!time) Object.assign( fmt,
-			{year: 'numeric', month: '2-digit', day: '2-digit'} )
+		if (!time) Object.assign(fmt, {year: 'numeric', month: '2-digit', day: '2-digit'})
 		return new Intl.DateTimeFormat('sv-SE', fmt).format(new Date(ts)) }
 
 // Page is static, so timestamps do not change and are pre-set here
