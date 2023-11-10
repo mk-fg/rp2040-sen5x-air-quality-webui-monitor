@@ -70,6 +70,7 @@ webui_head = b'''<!DOCTYPE html>
 :root { --c-fg: #d2f3ff; --c-bg: #09373b; }
 body { margin: 0 auto; padding: 1em;
 	max-width: 960px; color: var(--c-fg); background: var(--c-bg); }
+h3, ul { margin-block-end: 0; }
 a, a:visited { color: #5dcef5; }
 svg g { color: #d2f3ff; }
 svg text { font: 1rem 'Liberation Sans', 'Luxi Sans', sans-serif; }
@@ -278,7 +279,7 @@ class Sen5x:
 		errs_read_clear = (b'\xd2\x10', 0.02, errs_bs + errs_bs // 2, _errs),
 		get_serial = (b'\xd0\x33', 0.02, 48, lambda rx: rx.rstrip(b'\0').decode()) )
 
-	crc_map = ( # precalculated for poly=0x31 init=0xff xor=0
+	crc8_map = ( # precalculated for poly=0x31 init=0xff
 		b'\x001bS\xc4\xf5\xa6\x97\xb9\x88\xdb\xea}L\x1f.Cr!\x10\x87\xb6\xe5\xd4'
 		b'\xfa\xcb\x98\xa9>\x0f\\m\x86\xb7\xe4\xd5Bs \x11?\x0e]l\xfb\xca\x99\xa8'
 		b'\xc5\xf4\xa7\x96\x010cR|M\x1e/\xb8\x89\xda\xeb=\x0c_n\xf9\xc8\x9b\xaa'
@@ -312,12 +313,12 @@ class Sen5x:
 		finally: self.cmd_lock.release()
 
 	async def _run( self, cmd, delay,
-			tx_bytes, rx_bytes, rx_parser, rx_smv, crc_map=crc_map ):
+			tx_bytes, rx_bytes, rx_parser, rx_smv, crc8_map=crc8_map ):
 		if tx_bytes:
 			tx = bytearray((n := len(tx_bytes)) + n // 2)
 			for n in range(0, n, 2):
 				(b1, b2), m = tx_bytes[n:n+2], 3 * n // 2
-				tx[m], tx[m+1], tx[m+2] = b1, b2, crc_map[b2 ^ crc_map[b1 ^ 0xff]]
+				tx[m], tx[m+1], tx[m+2] = b1, b2, crc8_map[b2 ^ crc8_map[b1 ^ 0xff]]
 			cmd += tx
 
 		if rx_bytes:
@@ -338,7 +339,7 @@ class Sen5x:
 			self.bus.readfrom_into(self.addr, rx)
 			for n in range(0, rx_bytes, 3):
 				b1, b2, crc = rx[n:n+3]
-				if crc != crc_map[b2 ^ crc_map[b1 ^ 0xff]]:
+				if crc != crc8_map[b2 ^ crc8_map[b1 ^ 0xff]]:
 					raise self.Sen5xError('RX buffer CRC8 mismatch')
 				if m := n - (n+1) // 3: rx[m], rx[m+1] = b1, b2
 			if rx_smv: rx_smv[:] = rx[:rx_bytes-(rx_bytes+1)//3]
@@ -423,7 +424,7 @@ async def _sen5x_poller(sen5x, srb, alerts, td_data, td_errs, p_log):
 
 
 class SampleRingBuffer:
-	# Samples are stored in bytearray as they're received in Sen5x (circa crc's)
+	# Samples are stored in bytearray as they're received in Sen5x (crc8s stripped)
 	# n is of current free slot, n_ts is ticks_ms of the last slot, n_td = sampling interval
 	# If new sample has ts - n_ts > 2 * n_td (i.e. doesn't belong in next slot),
 	#   blk_skip is inserted with extra ms to add on top of n_td for that slot,

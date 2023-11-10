@@ -229,25 +229,26 @@ Aside from documentation (like this README), useful files in the repository are:
     npm install . && ./node_modules/.bin/rollup -c
     gzip <dist/d3.min.js >d3.v7.min.js.gz
 
-  Minified D3 version with all of its components can be fetched from
-  e.g. https://d3js.org/d3.v7.min.js URL.
+  Otherwise, minified D3 build with all of its components can also be fetched
+  from https://d3js.org/d3.v7.min.js URL, e.g. if you want to change WebUI and
+  want to use more D3 stuff in there.
 
   D3 can have breaking changes between major releases (like 7.x.x -> 8.x.x),
-  so it's probably best to use last version of a major release that ``webui.js``
-  is intended to work with, but newer ones can be selected via ``d3-api = ...``
-  opt in ``config.ini``.
+  so likely best to use last version of a major release that ``webui.js`` is
+  intended to work with, but newer ones can be selected via ``d3-api = ...``
+  opt in ``config.ini`` - probably also only relevant for development purposes.
 
-- `docs/ <docs>`_ - images and examples used in this README file, as well as any
-  dev helper scripts.
+- `docs/ <docs>`_ - images and examples used in this README file,
+  as well as any dev helper scripts.
 
   ``./docs/run-webui-http-server.py`` can be used to run a testing http server
   (on http://localhost:8000 ), with same WebUI as on devices and some example data,
   to tweak frontend JS easily.
 
   ``./docs/make-snapshot-html.py`` is to create self-contained single-file HTML
-  from any downloaded ``samples.8Bms_16Bsen5x_tuples.bin`` file, with all JS and
-  data embedded in it, which can be opened in any browser - essentially to
-  `Convert exported samples.bin into an interactive chart file`_.
+  from any downloaded ``samples.8Bms_16Bsen5x_tuples.bin`` data-export file,
+  with all JS and data embedded in it, which can be opened in any browser -
+  essentially to `Convert exported samples.bin into an interactive chart file`_.
 
 .. _ini: https://en.wikipedia.org/wiki/INI_file
 .. _D3.js: https://d3js.org/
