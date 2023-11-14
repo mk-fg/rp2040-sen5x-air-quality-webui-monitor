@@ -351,17 +351,10 @@ It can be done something like this:
   It has no significant dependencies, usual "make" should produce
   ``./build/mpy-cross`` binary (see also `Arch PKGBUILD for it here`_).
 
-  .. _mpy-cross tool: https://github.com/micropython/micropython/tree/master/mpy-cross
-  .. _Arch PKGBUILD for it here:
-    https://github.com/mk-fg/archlinux-pkgbuilds/blob/master/mpy-cross/PKGBUILD
-
 - Run ``mpy-cross -march=armv6m -O2 main.py -o aqm.mpy`` to build ``aqm.mpy``
   module file.
 
   See `official docs on .mpy files`_ for more info on picking compiler options above.
-
-  .. _official docs on .mpy files:
-    https://docs.micropython.org/en/latest/reference/mpyfiles.html#versioning-and-compatibility-of-mpy-files
 
 - Upload produced ``aqm.mpy`` file and test-run it::
 
@@ -392,6 +385,11 @@ see documentation on `MicroPython manifest files`_ for how to do it.
 
 .. _parse and then byte-compile:
   https://docs.micropython.org/en/latest/reference/constrained.html#compilation-phase
+.. _mpy-cross tool: https://github.com/micropython/micropython/tree/master/mpy-cross
+.. _Arch PKGBUILD for it here:
+  https://github.com/mk-fg/archlinux-pkgbuilds/blob/master/mpy-cross/PKGBUILD
+.. _official docs on .mpy files:
+  https://docs.micropython.org/en/latest/reference/mpyfiles.html#versioning-and-compatibility-of-mpy-files
 .. _MicroPython manifest files:
   https://docs.micropython.org/en/latest/reference/manifest.html
 
