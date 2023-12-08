@@ -11,8 +11,9 @@ except ImportError: import asyncio # newer mpy naming
 
 class AQMConf:
 
-	wifi_ap_base = dict(scan_interval=20.0, check_interval=10.0)
-	wifi_ap_map = dict()
+	wifi_sta_conf = dict(scan_interval=20.0, check_interval=10.0)
+	wifi_sta_aps = dict()
+	wifi_ap_conf = dict()
 
 	sensor_verbose = False
 	sensor_sample_interval = 60.0
@@ -156,33 +157,47 @@ def conf_parse(conf_file):
 	bool_map = {
 		'1': True, 'yes': True, 'y': True, 'true': True, 'on': True,
 		'0': False, 'no': False, 'n': False, 'false': False, 'off': False }
+	wifi_sec_map = {'wpa2-psk': 3, 'wpa/wpa2-psk': 4, 'wpa-psk': 2}
+	wifi_conf_keys = dict(
+		country=str, verbose=lambda v: bool_map[v],
+		scan_interval=float, check_interval=float, ssid=str, key=str,
+		hostname=str, channel=int, reconnects=int, txpower=float,
+		mac=lambda v: v.encode(), hidden=lambda v: bool_map[v],
+		security=lambda v: wifi_sec_map[v.lower() or 'wpa2-psk'],
+		pm=lambda v: network and getattr(network.WLAN, f'PM_{v.upper()}') )
 
-	if sec := conf_lines.get('wifi'):
-		ap_map = {None: conf.wifi_ap_base}
-		ap_keys = dict(
-			scan_interval=float, check_interval=float, key=str,
-			hostname=str, channel=int, reconnects=int, txpower=float,
-			mac=lambda v: v.encode(), hidden=lambda v: bool_map[v],
-			pm=lambda v: network and getattr(network.WLAN, f'PM_{v.upper()}') )
-		ssid, ap = None, dict()
+	if sec := conf_lines.get('wifi-ap'):
+		ap, prefix = dict(), '[conf.wifi-ap]'
+		for key_raw, key, val in sec:
+			if not (key_func := wifi_conf_keys.get(key)):
+				p_err(f'{prefix} Unrecognized config key [ {key_raw} ]')
+				continue
+			try: ap[key] = key_func(val)
+			except Exception as err:
+				p_err(f'{prefix} Failed to process {key_raw}=[ {val} ]: {err_fmt(err)}')
+		if ap.get('ssid') and ap.get('key'): conf.wifi_ap_conf = ap
+
+	if sec := conf_lines.get('wifi-client') or conf_lines.get('wifi'):
+		ap_map = {None: conf.wifi_sta_conf}
+		ssid, ap, ck = None, dict(), 'conf.wifi-client'
 		sec.append(('ssid', 'ssid', None)) # close last ssid= section
 		for key_raw, key, val in sec:
 			if key == 'country': ap_map[None][key] = val
 			elif key == 'verbose': ap_map[None][key] = bool_map[val]
 			elif key == 'ssid':
 				if ssid and not ap:
-					p_err(f'[conf.wifi] Skipping ssid without config [ {ssid} ]')
+					p_err(f'{prefix} Skipping ssid without config [ {ssid} ]')
 				else:
 					if ssid not in ap_map: ap_map[ssid] = ap_map[None].copy()
 					ap_map[ssid].update(ap)
 					ap.clear()
 				ssid = val
-			elif key_func := ap_keys.get(key):
+			elif key_func := wifi_conf_keys.get(key):
 				try: ap[key] = key_func(val)
 				except Exception as err:
-					p_err(f'[conf.wifi]: Failed to process [ {ssid} ] {key_raw}=[ {val} ]: {err_fmt(err)}')
-			else: p_err(f'[conf.wifi] Unrecognized config key [ {key_raw} ]')
-		conf.wifi_ap_base, conf.wifi_ap_map = ap_map.pop(None), ap_map
+					p_err(f'{prefix} Failed to process [ {ssid} ] {key_raw}=[ {val} ]: {err_fmt(err)}')
+			else: p_err(f'{prefix} Unrecognized config key [ {key_raw} ]')
+		conf.wifi_sta_conf, conf.wifi_sta_aps = ap_map.pop(None), ap_map
 
 	for sk in 'sensor', 'webui', 'alerts':
 		if not (sec := conf_lines.get(sk)): continue
@@ -199,12 +214,24 @@ def conf_parse(conf_file):
 	return conf
 
 
-async def wifi_client(ap_base, ap_map):
+def wifi_ap_setup(ap):
+	p_log = ap.get('verbose') and (lambda *a: print('[wifi]', *a))
+	if cc := ap.get('country'): network.country(cc)
+	ap_keys = [ 'ssid', 'key', 'hostname', 'security',
+		'pm', 'channel', 'reconnects', 'txpower', 'mac', 'hidden' ]
+	wifi = network.WLAN(network.AP_IF)
+	wifi.config(**dict((k, ap[k]) for k in ap_keys if k in ap))
+	wifi.active(True)
+	ip, net, gw, dns = wifi.ifconfig()
+	print(f'Setup Access Point [ {ap.get("ssid")} ] with IP {ip} (mask {net})')
+
+
+async def wifi_client(conf_base, ap_map):
 	def ssid_str(ssid):
 		try: return ssid.decode() # mpy 1.20 doesn't support errors= handling
 		except UnicodeError: return repr(ssid)[2:-1] # ascii + backslash-escapes
-	p_log = ap_base.get('verbose') and (lambda *a: print('[wifi]', *a))
-	if cc := ap_base.get('country'): network.country(cc)
+	p_log = conf_base.get('verbose') and (lambda *a: print('[wifi]', *a))
+	if cc := conf_base.get('country'): network.country(cc)
 	wifi = network.WLAN(network.STA_IF)
 	wifi.active(True)
 	p_log and p_log('Activated')
@@ -223,7 +250,7 @@ async def wifi_client(ap_base, ap_map):
 				p_log and p_log(f'Scan results [ {" // ".join(sorted(ssid_map))} ]')
 				for ssid, ap in ap_map.items():
 					if ssid_raw := ssid_map.get(ssid):
-						ap_conn = dict(ap_base, ssid=ssid_raw, **ap)
+						ap_conn = dict(conf_base, ssid=ssid_raw, **ap)
 						break
 			if ap_conn:
 				p_log and p_log(f'Connecting to [ {ssid_str(ap_conn["ssid"])} ]')
@@ -233,8 +260,8 @@ async def wifi_client(ap_base, ap_map):
 		elif ap_conn: ap_conn, ap_reconn = None, ap_conn
 		if ap_conn: st, delay = 'connecting', ap_conn['scan_interval']
 		elif ap_reconn or st: # can also be connection from earlier script-run
-			st, delay = 'connected', (ap_reconn or ap_base)['check_interval']
-		else: st, delay = 'searching', ap_base['scan_interval']
+			st, delay = 'connected', (ap_reconn or conf_base)['check_interval']
+		else: st, delay = 'searching', conf_base['scan_interval']
 		if addrs := wifi.ifconfig():
 			if p_log: st += f' [{addrs[0]}]'
 			elif addr_last != addrs[0]:
@@ -945,11 +972,12 @@ async def main():
 	print('--- AQM init ---')
 	wifi, conf = None, conf_parse('config.ini')
 
-	if conf.wifi_ap_map:
+	if conf.wifi_ap_conf or conf.wifi_sta_aps:
 		if not getattr(network, 'WLAN', None):
 			p_err('No networking/wifi support detected in micropython firmware, aboring')
-			return p_err('Either remove/clear [wifi] config section or replace device/firmware')
-		wifi = asyncio.create_task(wifi_client(conf.wifi_ap_base, conf.wifi_ap_map))
+			return p_err('Either remove/clear [wifi-*] config section(s) or replace device/firmware')
+		if conf.wifi_ap_conf: wifi_ap_setup(conf.wifi_ap_conf)
+		else: wifi = asyncio.create_task(wifi_client(conf.wifi_sta_conf, conf.wifi_sta_aps))
 
 	fail = None
 	try: return await main_aqm(conf, wifi)
@@ -971,7 +999,7 @@ async def main():
 
 	if wifi and wifi.done():
 		p_err('[wifi] Connection monitoring task failed, restarting it')
-		wifi = wifi_client(conf.wifi_ap_base, conf.wifi_ap_map)
+		wifi = wifi_client(conf.wifi_sta_conf, conf.wifi_sta_aps)
 
 	p_err('Starting emergency-WebUI with a traceback page')
 	httpd = await asyncio.start_server(

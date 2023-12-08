@@ -110,7 +110,7 @@ which needs following things in order to work:
 
   Might be a good idea to enable all verbose=yes options there for the first run.
 
-  Wi-Fi SSID configuration can be left blank to not configure WLAN interface,
+  Wi-Fi configuration can be removed to not configure WLAN interface,
   in which case script should be able to run on devices that don't have it,
   logging data to console if verbose=yes is enabled in ``[sensor]`` section.
 
@@ -134,6 +134,11 @@ logging is enabled in config sections, and also connect to network as configured
   After "run main.py" command, Ctrl-C will stop mpremote showing its output,
   but to actually stop it, either run ``mpremote`` to connect to `repl console`_
   and Ctrl-C-interrupt it there, or e.g. ``mpremote soft-reset`` command.
+
+  In Access Point mode (setup via ``[wifi-ap]`` config section), use DHCP
+  server's IP address - something like http://192.168.4.1 - likely .1 in
+  the right subnet, and in Client/STA mode (``[wifi-client]`` section),
+  it should be assigned through DHCP from the connected AP/router.
 
   Dynamic DHCP addrs should always be logged over serial when they change,
   but there's also an easy way to print those from python anytime, for example::
@@ -220,8 +225,8 @@ Aside from documentation (like this README), useful files in the repository are:
 
 - `main.py <main.py>`_ - micropython script to run on the device.
 
-  Runs 3 main components (as asyncio tasks) - WiFi scanner/monitor and
-  SSID-picker, I²C sensor data poller, http server for WebUI and data exports.
+  Runs 3 main components (as asyncio tasks) - WiFi AP or scanner/monitor,
+  I²C sensor data poller, http server for WebUI and data exports.
 
 - config.example.ini_ - example ini_ configuration file with all parameters,
   and comment lines describing what less obvious ones are for.
