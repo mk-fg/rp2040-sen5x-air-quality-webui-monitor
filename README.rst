@@ -73,7 +73,11 @@ which needs following things in order to work:
   For all further interactions with the thing, I'd recommend installing official
   mpremote_ tool (use pipx_ for clean installs). Running it should get a python
   shell prompt on connected device, it allows to copy/run files there easily,
-  and is used in all examples below.
+  and is used in all examples below. 
+
+  After running mpremote_, it'll automatically 
+  connect to your device. To disconnect press control+x, to reboot the device
+  press control+d.
 
   Tested to work with micropython 1.20.0 - 1.21.0, and should likely work
   with all future versions as well, as they rarely break backwards-compatibility.
@@ -98,7 +102,21 @@ which needs following things in order to work:
 
   Without these files, WebUI will only display data download links.
 
-Main script can be started via mpremote like this: ``mpremote run main.py``
+- Doing all the steps you should have copied five files to your device
+
+    mpremote cp config.example.ini :config.ini
+
+    mpremote cp webui.js.gz :webui.js.gz
+
+    mpremote cp d3.v7.min.js.gz :d3.v7.min.js.gz
+
+    mpremote cp favicon.ico.gz :favicon.ico.gz
+
+    mpremote cp main.py :main.py
+
+
+The Main script will run automatically at boot, but can also be started via mpremote 
+like this: ``mpremote run main.py`` 
 
 Should log messages/errors over USB /dev/ttyACMx or UART to mpremote or any
 other serial tool connected there (like screen_ or minicom_), esp. if verbose
