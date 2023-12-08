@@ -54,6 +54,26 @@ Or here's a screenshot of how it looks, as of bf06d86 / 2023-07-02 (might be old
 .. _simple ini config: config.example.ini
 
 
+Quick TL;DR how-to-use version
+------------------------------
+
+See `How to use this`_ section below for more detailed explaination, but gist of
+it can be summarized in the following block of shell commands::
+
+  ## Upload micropython firmware to the device, install "mpremote" tool
+
+  % cp config.example.ini config.ini
+  ## Edit that config.ini file, to setup local device/network parameters
+
+  % mpremote cp config.ini :
+
+  % gzip <webui.js >webui.js.gz
+  % mpremote cp main.py webui.js.gz d3.v7.min.js.gz favicon.ico.gz :
+  % mpremote reset
+
+If it looks confusing, see below for a longer description of all these steps.
+
+
 How to use this
 ---------------
 
@@ -73,11 +93,12 @@ which needs following things in order to work:
   For all further interactions with the thing, I'd recommend installing official
   mpremote_ tool (use pipx_ for clean installs). Running it should get a python
   shell prompt on connected device, it allows to copy/run files there easily,
-  and is used in all examples below. 
+  and is used in all examples below.
 
-  After running mpremote_, it'll automatically 
-  connect to your device. To disconnect press control+x, to reboot the device
-  press control+d.
+    Running mpremote will automatically connect to the device.
+    Press Enter if you don't see a prompt there, Ctrl-x or Ctrl-] in its
+    console to disconnect, Ctrl-c to stop currently-running script (if any),
+    Ctrl-d to soft-reboot the controller.
 
   Tested to work with micropython 1.20.0 - 1.21.0, and should likely work
   with all future versions as well, as they rarely break backwards-compatibility.
@@ -102,21 +123,7 @@ which needs following things in order to work:
 
   Without these files, WebUI will only display data download links.
 
-- Doing all the steps you should have copied five files to your device
-
-    mpremote cp config.example.ini :config.ini
-
-    mpremote cp webui.js.gz :webui.js.gz
-
-    mpremote cp d3.v7.min.js.gz :d3.v7.min.js.gz
-
-    mpremote cp favicon.ico.gz :favicon.ico.gz
-
-    mpremote cp main.py :main.py
-
-
-The Main script will run automatically at boot, but can also be started via mpremote 
-like this: ``mpremote run main.py`` 
+Main script can be started via mpremote like this: ``mpremote run main.py``
 
 Should log messages/errors over USB /dev/ttyACMx or UART to mpremote or any
 other serial tool connected there (like screen_ or minicom_), esp. if verbose
@@ -139,6 +146,10 @@ If ``main.py`` file is copied to the fw storage (next to ``config.ini`` there),
 it will be automatically started when device powers-up (must be named either
 "main.py" or "boot.py" for that), but can be stopped anytime via terminal in the
 same way as with "run" command above - connect and Ctrl-C or soft-reset into REPL_.
+
+`Quick TL;DR how-to-use version`_ section above has a more succinct version of
+these steps and required commands to do a basic setup of the whole thing,
+and can be used as a concrete example of how to do it or for later reference.
 
 ``main.py`` can also be compiled into an `.mpy module file`_ to take less
 storage space on the flash and start faster - see `Setup to auto-run efficiently
