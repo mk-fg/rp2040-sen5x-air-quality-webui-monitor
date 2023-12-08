@@ -141,16 +141,21 @@ webui_err_msgs = dict(
 
 
 def conf_parse(conf_file):
-	with open(conf_file) as src:
+	with open(conf_file, 'rb') as src:
 		sec, conf_lines = None, dict()
-		for n, line in enumerate(map(str.strip, src), 1):
+		for n, line in enumerate(src, 1):
+			if n == 1 and line[:3] == b'\xef\xbb\xbf': line = line[3:]
+			try: line = line.decode().strip()
+			except UnicodeError:
+				p_err(f'[conf] Ignoring line {n} - failed to decode utf-8: {line}')
+				continue
 			if not line or line[0] in '#;': continue
 			if line[0] == '[' and line[-1] == ']':
 				sec = conf_lines[line[1:-1].lower()] = list()
 			else:
 				key, _, val = map(str.strip, line.partition('='))
 				if sec is None:
-					p_err(f'[conf] Ignoring line {n} before section header(s) [ {key} ]')
+					p_err(f'[conf] Ignoring line {n} key before section header(s) - {repr(key)}')
 				else: sec.append((key, key.replace('-', '_').lower(), val))
 
 	conf = AQMConf()
