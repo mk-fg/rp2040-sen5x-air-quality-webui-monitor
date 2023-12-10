@@ -71,6 +71,8 @@ it can be summarized in the following block of shell commands::
   % mpremote cp main.py webui.js.gz d3.v7.min.js.gz favicon.ico.gz :
   % mpremote reset
 
+  ## Connect to AP and go to http://192.168.4.1 or whatever IP it gets in STA mode
+
 If it looks confusing, see below for a longer description of all these steps.
 
 
