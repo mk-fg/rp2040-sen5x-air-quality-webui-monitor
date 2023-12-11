@@ -1,8 +1,8 @@
 RP2040 SEN5x Air Quality WebUI Monitor
 ======================================
 
-Self-contained micropython_ script for `RP2040-based controllers`_
-(e.g. `Raspberry Pi Pico`_ and its clones, but might work on non-RP2xxx devices too)
+Self-contained micropython_ script for microcontrollers that can run micropython
+firmware (e.g. `RP2040-based`_ `Raspberry Pi Pico`_ or ESP32_ boards, and likely others),
 to monitor air quality parameters (VOC, PM1.0, PM2.5, PM4, PM10 and such),
 using connected I²C Sensirion SEN5x sensor (e.g. SEN54_ or `SEN54 in a box`_)
 and display/export that data via basic http web interface, with some charts there.
@@ -45,7 +45,8 @@ Or here's a screenshot of how it looks, as of bf06d86 / 2023-07-02 (might be old
    :align: center
 
 .. _micropython: https://docs.micropython.org/en/latest/
-.. _RP2040-based controllers: https://en.wikipedia.org/wiki/RP2040
+.. _RP2040-based: https://en.wikipedia.org/wiki/RP2040
+.. _ESP32: https://en.wikipedia.org/wiki/ESP32
 .. _Raspberry Pi Pico:
   https://www.raspberrypi.com/documentation/microcontrollers/raspberry-pi-pico.html
 .. _SEN54: https://sensirion.com/products/catalog/SEN54
@@ -82,12 +83,13 @@ How to use this
 All functionality on the device is implemented by the `main.py script`_,
 which needs following things in order to work:
 
-- `MicroPython firmware`_ installed on the microcontroller (RP2040 or other supported one).
+- `MicroPython firmware`_ installed on the microcontroller board.
 
   `Download page`_ for it has a silly-long list of supported devices,
-  with their own install links/instructions/notes, but on RP2040 it goes something like this:
+  with their own install links/instructions/notes, but on RP2040 (for example)
+  it goes something like this:
 
-  - Pick/download the right .uf2 file (`from rp2-pico-w page`_ for RPi Pico W likes).
+  - Pick/download the right .uf2 file (e.g. `from rp2-pico-w page`_ for RPi Pico W).
   - Connect tiny board with BOOTSEL switch pressed on boot (or something like it),
     so that it will appear as a USB mass storage device (aka flash drive or usb-stick).
   - Copy UF2 file there, it'll auto-reboot into micropython as soon as copying is done.
@@ -187,7 +189,7 @@ Pinout diagram of the device used to run the main script should have I2C
 pins (or VBUS/VSYS - same thing as 5V for the purposes of connecting the sensor).
 
 SEN5x should be connected to same I2C SDA/SCL pins, powered via VDD/GND pins,
-and have its SEL pin connected to GND pin as well:
+and have its SEL pin connected to GND pin as well. With RPi Pico W for example:
 
 .. image:: https://mk-fg.github.io/rp2040-sen5x-air-quality-webui-monitor/docs/wiring-example.jpg
    :width: 100%
@@ -196,9 +198,10 @@ and have its SEL pin connected to GND pin as well:
 With `Grove interface`_ on `a packaged SEN54 module`_, it's the same idea -
 yellow/white wires being I2C SCL/SDA respectively, and red/black are VDD/GND ones.
 
-RP2040 have multiple I2C interfaces, which can be exposed on different pins, all
-of which must be specified correctly in the ``config.ini`` file uploaded to flash,
-using GP<n> numbers for pins (e.g. 0 as in GP0 instead of number for a physical pin).
+Microcontrollers can have multiple I2C interfaces, which can be exposed on different pins,
+all of which must be specified correctly in the ``config.ini`` file uploaded to flash,
+using controller-specific numbers for pins (e.g. GP<n> for RP2040, with 0 as in GP0 instead
+of number for a physical pin).
 
 For example, with wiring as per `image above`_, following values should be used there::
 
@@ -234,7 +237,7 @@ Aside from documentation (like this README), useful files in the repository are:
   and comment lines describing what less obvious ones are for.
 
   Intended to be used as a template for creating required ``config.ini`` file
-  to upload to RP2xxx, but can be also useful to track changes in wrt new features,
+  to upload to device, but can be also useful to track changes in wrt new features,
   modified defaults and such, when updating to new code from this repo.
 
 - `webui.js <webui.js>`_ - JavaScript frontend code for WebUI data visualization.
@@ -505,6 +508,9 @@ snooze-delay, which will suppress alerts for any subset of keys to this address.
 Links
 -----
 
+- `Github Issue #6`_ has a note on how to setup this on a cheaper
+  $2 Wemos ESP32 S2 Mini board, instead of a more expensive RP2040 ones.
+
 - ESPHome_ - more comprehensive home automation system,
   which also supports SEN5x sensors connected to RP2040 platforms.
 
@@ -517,6 +523,7 @@ Links
 
 - `IKEA VINDSTYRKA`_ - also a smart air-quality meter with SEN54 sensor.
 
+.. _Github Issue #6: https://github.com/mk-fg/rp2040-sen5x-air-quality-webui-monitor/issues/6
 .. _ESPHome: https://esphome.io/components/sensor/sen5x.html
 .. _Sensirion/python-i2c-sen5x: https://github.com/Sensirion/python-i2c-sen5x
 .. _AirGradient Open Air: https://www.airgradient.com/open-air/
