@@ -104,7 +104,7 @@ which needs following things in order to work:
     console to disconnect, Ctrl-c to stop currently-running script (if any),
     Ctrl-d to soft-reboot the controller.
 
-  Tested to work with micropython 1.20.0 - 1.21.0, and should likely work
+  Tested to work with micropython 1.20.x - 1.22.x, and should likely work
   with all future versions as well, as they rarely break backwards-compatibility.
 
 - ``config.ini`` file with configuration parameters, uploaded to device.
