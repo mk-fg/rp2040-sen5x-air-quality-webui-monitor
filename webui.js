@@ -119,12 +119,13 @@ Data: {
 let margin = {top: 20, right: 130, bottom: 50, left: 70},
 	sz = {w: 960 - margin.left - margin.right, h: 700 - margin.top - margin.bottom},
 	x = d3.scaleTime().range([0, sz.w]).domain(d3.extent(data, d => d.ts)),
-	y_pmx_ext = (() => { // find y to exclude any off-the-charts outliers
-		let arr = d3.sort(ds_pmx.map(k => data.map(d => d[k])).flat()),
-			ext_q = q => arr[Math.min(arr.length-1, parseInt(arr.length * q) + 1)],
-			ext = d3.max(arr), ext_max = ext_q(0.95) / 0.5 // 95% values on 50%+ space
-		if (arr.length > 10) [0.999, 0.996, 0.993, 0.99, 0.98, 0.96, 0.93, 0.9]
-			.some(q => { if ((q = ext_q(q)) <= ext_max) { ext = q; return true } })
+	y_pmx_ext = (() => { // find y extent to exclude any off-the-charts outliers
+		let pmx = d3.sort(ds_pmx.map(k => data.map(d => d[k])).flat()),
+			ext_q = q => pmx[Math.min(pmx.length-1, parseInt(pmx.length * q) + 1)],
+			ext = pmx[pmx.length-1], ext_max = ext_q(0.95) / 0.5 // low-95% go up to 50%+
+		if (pmx.length > 10 && ext > ext_max)
+			[0.999, 0.998, 0.997, 0.995, 0.992, 0.99, 0.98, 0.965, 0.95]
+				.some(q => { if ((q = ext_q(q)) <= ext_max) { ext = q; return true } })
 		return ext })(),
 	y_pmx = d3.scaleLinear().range([sz.h, 0]).domain([0, y_pmx_ext]),
 	ys = Object.fromEntries(
