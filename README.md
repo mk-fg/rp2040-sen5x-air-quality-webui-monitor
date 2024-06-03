@@ -434,16 +434,18 @@ It can be done something like this:
 
 - Make and upload loader file to run `aqm.mpy` on board boot.
 
-  Same code as in "exec" command above can be uploaded to `main.py` file on
-  the board's flash storage to import/run `aqm.mpy` on boot::
+    Same code as in "exec" command above can be uploaded to `main.py` file on
+    the board's flash storage to import/run `aqm.mpy` on boot:
 
+    ``` console
     % echo 'import aqm; aqm.run()' >loader.py
     % mpremote cp loader.py :main.py
+    ```
 
 - `mpremote reset` or power-cycle device, check that everything runs correctly.
 
-  If verbose logging is enabled, running `mpremote` or connecting to device
-  usb-tty should have the same output there as when test-running main.py earlier.
+    If verbose logging is enabled, running `mpremote` or connecting to device
+    usb-tty should have the same output there as when test-running main.py earlier.
 
 Even more optimization can be done by embedding "frozen bytecode" into board's
 micropython firmware image using a manifest file, in which case it will run
@@ -564,3 +566,4 @@ snooze-delay, which will suppress alerts for any subset of keys to this address.
 
 - Enable WDT, if available on RP2040, displaying reboots via it as an error in WebUI.
 - More mobile-friendly WebUI visualizations.
+- Add optional tls wrapper in WebUI, for boards with more RAM at least.
