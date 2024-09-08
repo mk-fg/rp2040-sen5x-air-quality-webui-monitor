@@ -189,7 +189,7 @@ to take less storage space on the flash and start faster - see
 See [Repository contents] below for more information on other optional files.
 
 [main.py script]: main.py
-[MicroPython firmware]: https://docs.micropython.org/
+[MicroPython firmware]: https://micropython.org/
 [Download page]: https://micropython.org/download/
 [from rp2-pico-w page]: https://micropython.org/download/rp2-pico-w/
 [mpremote]: https://docs.micropython.org/en/latest/reference/mpremote.html
