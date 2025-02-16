@@ -1,3 +1,5 @@
+# -*- mode: python -*-
+
 import os, gc, struct, machine, time
 
 try: import network # required for wifi stuff
