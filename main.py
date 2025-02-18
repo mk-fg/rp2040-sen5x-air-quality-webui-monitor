@@ -864,7 +864,7 @@ class UDPAlerts:
 
 		errs = set()
 		for n, k, a, b in self.bounds:
-			if not a <= data[n] <= b: errs.add(k)
+			if data[n] is not None and not a <= data[n] <= b: errs.add(k)
 		if not errs: return # all within bounds
 
 		ts, dst_addrs = time.ticks_ms(), list()
