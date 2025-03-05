@@ -447,6 +447,11 @@ It can be done something like this:
     If verbose logging is enabled, running `mpremote` or connecting to device
     usb-tty should have the same output there as when test-running main.py earlier.
 
+Can also add e.g. `machine.Pin('LED', machine.Pin.OUT).on()` to `main.py` loader
+script (before `aqm.run()` loop) to have an on-board LED light up when board/script
+starts up, with `'LED'` pin there for rpi-pico-w port, and e.g. `2` for ESP32s,
+or whatever GPIO pin typical onboard LED is connected to on other boards.
+
 Even more optimization can be done by embedding "frozen bytecode" into board's
 micropython firmware image using a manifest file, in which case it will run
 directly from flash storage and not use RAM for that - faster, and leaving more
